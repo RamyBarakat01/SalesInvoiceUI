@@ -1,0 +1,870 @@
+
+@page "/invoice-details"
+@rendermode InteractiveServer
+@using System.Net.Http.Json
+@inject IHttpClientFactory HttpClientFactory
+
+<PageTitle>Invoice Details</PageTitle>
+
+<h1>Invoice Details</h1>
+<p class="text-muted">
+    Search for an invoice using its ID.
+</p>
+
+<div class="card shadow-sm p-4 mb-4">
+    <label class="form-label">Invoice ID</label>
+
+    <div class="d-flex gap-2">
+        <input type="number"
+               min="1"
+               class="form-control"
+               placeholder="Enter invoice ID"
+               @bind="invoiceId"
+               disabled="@(isLoading || isSaving || isDeleting)" />
+
+        <button class="btn btn-primary"
+                disabled="@(isLoading || isSaving || isDeleting)"
+                @onclick="SearchInvoice">
+            @(isLoading ? "Searching..." : "Search")
+        </button>
+    </div>
+</div>
+
+@if (!string.IsNullOrWhiteSpace(errorMessage))
+{
+    <div class="alert alert-danger">@errorMessage</div>
+}
+
+@if (!string.IsNullOrWhiteSpace(successMessage))
+{
+    <div class="alert alert-success">@successMessage</div>
+}
+
+@if (invoice != null)
+{
+    <div class="card shadow-sm p-4">
+
+        <div class="d-flex justify-content-between mb-3">
+            <div>
+                <h3>@invoice.InvoiceNumber</h3>
+
+                <p class="text-muted mb-0">
+                    Customer: @invoice.CustomerName
+                </p>
+
+                <p class="text-muted">
+                    Date: @invoice.InvoiceDate.ToString("dd MMM yyyy")
+                </p>
+            </div>
+
+            <div class="text-end">
+                <small class="text-muted">
+                    @(isEditing ? "Updated Invoice Total" : "Invoice Total")
+                </small>
+
+                <h3>
+                    EGP @(isEditing
+                        ? CalculateTotal().ToString("N2")
+                        : invoice.TotalAmount.ToString("N2"))
+                </h3>
+            </div>
+        </div>
+
+        <div class="d-flex justify-content-between align-items-center mb-3">
+            <h5 class="mb-0">Purchased Products</h5>
+
+            @if (!isEditing)
+            {
+                <div class="d-flex gap-2">
+                    <button class="btn btn-outline-primary"
+                            disabled="@(isLoading || isDeleting)"
+                            @onclick="StartEditing">
+                        Edit Invoice
+                    </button>
+
+                    <button class="btn btn-outline-danger"
+                            disabled="@(isLoading || isDeleting)"
+                            @onclick="ShowDeleteConfirmation">
+                        Delete Invoice
+                    </button>
+                </div>
+            }
+        </div>
+
+        <div class="table-responsive">
+            <table class="table table-striped">
+                <thead>
+                    <tr>
+                        <th>Product</th>
+                        <th>Quantity</th>
+                        <th>Unit Price</th>
+                        <th>Discount %</th>
+                        <th>Line Total</th>
+
+                        @if (isEditing)
+                        {
+                            <th>Action</th>
+                        }
+                    </tr>
+                </thead>
+
+                <tbody>
+                    @if (isEditing)
+                    {
+                        @foreach (var item in editItems)
+                        {
+                            <tr @key="item">
+                                <td>
+                                    @item.ProductName
+
+                                    @if (item.InvoiceItemId == 0)
+                                    {
+                                        <span class="badge bg-success ms-2">
+                                            New
+                                        </span>
+                                    }
+                                </td>
+
+                                <td>
+                                    <input type="number"
+                                           min="1"
+                                           step="1"
+                                           class="form-control"
+                                           style="min-width: 80px"
+                                           @bind="item.Quantity"
+                                           @bind:event="oninput"
+                                           disabled="@isSaving" />
+                                </td>
+
+                                <td>
+                                    @if (item.InvoiceItemId == 0)
+                                    {
+                                        <span>
+                                            EGP @item.UnitPrice.ToString("N2")
+                                        </span>
+                                    }
+                                    else
+                                    {
+                                        <input type="number"
+                                               min="0"
+                                               step="0.01"
+                                               class="form-control"
+                                               style="min-width: 110px"
+                                               @bind="item.UnitPrice"
+                                               @bind:event="oninput"
+                                               disabled="@isSaving" />
+                                    }
+                                </td>
+
+                                <td>
+                                    <input type="number"
+                                           min="0"
+                                           max="100"
+                                           step="0.01"
+                                           class="form-control"
+                                           style="min-width: 90px"
+                                           @bind="item.DiscountPercent"
+                                           @bind:event="oninput"
+                                           disabled="@isSaving" />
+                                </td>
+
+                                <td>
+                                    EGP @GetEditedLineTotal(item).ToString("N2")
+                                </td>
+
+                                <td>
+                                    <button class="btn btn-sm btn-outline-danger"
+                                            disabled="@isSaving"
+                                            @onclick="() => RemoveItem(item)">
+                                        Remove
+                                    </button>
+                                </td>
+                            </tr>
+                        }
+                    }
+                    else
+                    {
+                        @foreach (var item in invoice.Items)
+                        {
+                            <tr>
+                                <td>@item.ProductName</td>
+
+                                <td>@item.Quantity</td>
+
+                                <td>
+                                    EGP @item.UnitPrice.ToString("N2")
+                                </td>
+
+                                <td>
+                                    @item.DiscountPercent.ToString("N2")%
+                                </td>
+
+                                <td>
+                                    EGP @item.LineTotal.ToString("N2")
+                                </td>
+                            </tr>
+                        }
+                    }
+                </tbody>
+            </table>
+        </div>
+
+        @if (isEditing)
+        {
+            <div class="border rounded p-3 mt-3">
+                <h5>Add Product</h5>
+
+                <div class="row g-3 align-items-end">
+                    <div class="col-md-6">
+                        <label class="form-label">Product</label>
+
+                        <select class="form-select"
+                                @bind="selectedProductId"
+                                disabled="@isSaving">
+
+                            <option value="0">Select a product</option>
+
+                            @foreach (var product in products)
+                            {
+                                <option value="@product.ProductId">
+                                    @product.Name - EGP @product.Price.ToString("N2")
+                                </option>
+                            }
+                        </select>
+                    </div>
+
+                    <div class="col-md-3">
+                        <label class="form-label">Quantity</label>
+
+                        <input type="number"
+                               min="1"
+                               step="1"
+                               class="form-control"
+                               @bind="newProductQuantity"
+                               disabled="@isSaving" />
+                    </div>
+
+                    <div class="col-md-3">
+                        <button class="btn btn-outline-primary w-100"
+                                disabled="@isSaving"
+                                @onclick="AddProduct">
+                            Add Product
+                        </button>
+                    </div>
+                </div>
+            </div>
+        }
+
+        <div class="border rounded p-3 mt-4">
+            <h5>Invoice Summary</h5>
+            <hr />
+
+            <div class="d-flex justify-content-between mb-2">
+                <span>Subtotal Before Discounts</span>
+
+                <span>
+                    EGP @(isEditing
+                        ? EditedOriginalSubtotal.ToString("N2")
+                        : SavedOriginalSubtotal.ToString("N2"))
+                </span>
+            </div>
+
+            <div class="d-flex justify-content-between mb-2">
+                <span>Total Item Discounts</span>
+
+                <span>
+                    - EGP @(isEditing
+                        ? EditedItemDiscounts.ToString("N2")
+                        : SavedItemDiscounts.ToString("N2"))
+                </span>
+            </div>
+
+            <div class="d-flex justify-content-between mb-3">
+                <span>Subtotal After Item Discounts</span>
+
+                <strong>
+                    EGP @(isEditing
+                        ? EditedSubtotal.ToString("N2")
+                        : SavedSubtotal.ToString("N2"))
+                </strong>
+            </div>
+
+            <div class="row align-items-end mb-3">
+                <div class="col-md-4">
+                    <label class="form-label">
+                        Invoice Discount %
+                    </label>
+
+                    @if (isEditing)
+                    {
+                        <input type="number"
+                               min="0"
+                               max="100"
+                               step="0.01"
+                               class="form-control"
+                               @bind="editedInvoiceDiscountPercent"
+                               @bind:event="oninput"
+                               disabled="@isSaving" />
+                    }
+                    else
+                    {
+                        <div class="form-control bg-light">
+                            @invoice.DiscountPercent.ToString("N2")%
+                        </div>
+                    }
+                </div>
+
+                <div class="col-md-8">
+                    <div class="d-flex justify-content-between mt-3">
+                        <span>Invoice Discount Amount</span>
+
+                        <span>
+                            - EGP @(isEditing
+                                ? EditedInvoiceDiscountAmount.ToString("N2")
+                                : SavedInvoiceDiscountAmount.ToString("N2"))
+                        </span>
+                    </div>
+                </div>
+            </div>
+
+            <div class="d-flex justify-content-between mb-2">
+                <span>Total Before Rounding</span>
+                <span>
+                    EGP @(isEditing
+                        ? EditedTotalBeforeRounding.ToString("N2")
+                        : SavedTotalBeforeRounding.ToString("N2"))
+                </span>
+            </div>
+
+            <div class="d-flex justify-content-between mb-2">
+                <span>Automatic Rounding Discount</span>
+                <span>
+                    - EGP @(isEditing
+                        ? EditedRoundingDiscount.ToString("N2")
+                        : invoice.RoundingDiscount.ToString("N2"))
+                </span>
+            </div>
+
+            <hr />
+
+            <div class="d-flex justify-content-between">
+                <h5>Final Invoice Total</h5>
+
+                <h4 class="text-primary">
+                    EGP @(isEditing
+                        ? CalculateTotal().ToString("N2")
+                        : invoice.TotalAmount.ToString("N2"))
+                </h4>
+            </div>
+        </div>
+
+        @if (isEditing)
+        {
+            <div class="d-flex gap-2 mt-4">
+                <button class="btn btn-success"
+                        disabled="@isSaving"
+                        @onclick="SaveChanges">
+                    @(isSaving ? "Saving..." : "Save Changes")
+                </button>
+
+                <button class="btn btn-outline-secondary"
+                        disabled="@isSaving"
+                        @onclick="CancelEditing">
+                    Cancel
+                </button>
+            </div>
+        }
+
+        @if (showDeleteConfirmation)
+        {
+            <div class="alert alert-warning mt-3">
+                <p>
+                    Are you sure you want to delete invoice
+                    <strong>@invoice.InvoiceNumber</strong>?
+                </p>
+
+                <p>
+                    This will permanently delete the invoice
+                    and all its items.
+                </p>
+
+                <div class="d-flex gap-2">
+                    <button class="btn btn-danger"
+                            disabled="@isDeleting"
+                            @onclick="DeleteInvoice">
+                        @(isDeleting ? "Deleting..." : "Yes, Delete Invoice")
+                    </button>
+
+                    <button class="btn btn-secondary"
+                            disabled="@isDeleting"
+                            @onclick="CancelDeletion">
+                        Cancel
+                    </button>
+                </div>
+            </div>
+        }
+    </div>
+}
+
+@code {
+    private int invoiceId = 1;
+
+    [SupplyParameterFromQuery(Name = "id")]
+    public int? InvoiceIdFromUrl { get; set; }
+
+    private bool isLoading;
+    private bool isSaving;
+    private bool isEditing;
+    private bool isDeleting;
+    private bool showDeleteConfirmation;
+
+    private string errorMessage = "";
+    private string successMessage = "";
+
+    private InvoiceDto? invoice;
+
+    private List<ProductDto> products = new();
+    private List<EditableInvoiceItem> editItems = new();
+
+    private int selectedProductId;
+    private int newProductQuantity = 1;
+
+    // Temporary invoice discount while editing.
+    private decimal editedInvoiceDiscountPercent;
+
+    private HttpClient Api =>
+        HttpClientFactory.CreateClient("SalesInvoiceAPI");
+
+    protected override async Task OnParametersSetAsync()
+    {
+        if (InvoiceIdFromUrl.HasValue &&
+            InvoiceIdFromUrl.Value > 0)
+        {
+            invoiceId = InvoiceIdFromUrl.Value;
+            await SearchInvoice();
+        }
+    }
+
+    private async Task SearchInvoice()
+    {
+        if (isLoading || isSaving || isDeleting)
+        {
+            return;
+        }
+
+        errorMessage = "";
+        successMessage = "";
+
+        invoice = null;
+        isEditing = false;
+        showDeleteConfirmation = false;
+        editItems.Clear();
+
+        if (invoiceId <= 0)
+        {
+            errorMessage = "Please enter a valid invoice ID.";
+            return;
+        }
+
+        isLoading = true;
+
+        try
+        {
+            var response = await Api.GetAsync(
+                $"api/invoices/{invoiceId}");
+
+            if (response.StatusCode ==
+                System.Net.HttpStatusCode.NotFound)
+            {
+                errorMessage = "Invoice not found.";
+                return;
+            }
+
+            response.EnsureSuccessStatusCode();
+
+            invoice = await response.Content
+                .ReadFromJsonAsync<InvoiceDto>();
+        }
+        catch (Exception ex)
+        {
+            errorMessage =
+                "Could not retrieve invoice: " + ex.Message;
+        }
+        finally
+        {
+            isLoading = false;
+        }
+    }
+
+    // Create a separate editable copy of the invoice.
+    private async Task StartEditing()
+    {
+        if (invoice == null || isLoading || isSaving || isDeleting)
+        {
+            return;
+        }
+
+        errorMessage = "";
+        successMessage = "";
+        showDeleteConfirmation = false;
+
+        try
+        {
+            products = await Api.GetFromJsonAsync<List<ProductDto>>(
+                "api/products") ?? new();
+
+            editItems = invoice.Items.Select(item =>
+                new EditableInvoiceItem
+                {
+                    InvoiceItemId = item.InvoiceItemId,
+                    ProductId = item.ProductId,
+                    ProductName = item.ProductName,
+                    Quantity = item.Quantity,
+                    UnitPrice = item.UnitPrice,
+                    DiscountPercent = item.DiscountPercent
+                }).ToList();
+
+            editedInvoiceDiscountPercent = invoice.DiscountPercent;
+
+            selectedProductId = 0;
+            newProductQuantity = 1;
+            isEditing = true;
+        }
+        catch (Exception ex)
+        {
+            errorMessage =
+                "Could not load products: " + ex.Message;
+        }
+    }
+
+    // Original amount before item discounts.
+    private decimal GetEditedOriginalLineTotal(EditableInvoiceItem item)
+    {
+        return item.UnitPrice * item.Quantity;
+    }
+
+    // Individual item discount amount.
+    private decimal GetEditedItemDiscount(EditableInvoiceItem item)
+    {
+        return decimal.Round(
+            GetEditedOriginalLineTotal(item) *
+            item.DiscountPercent / 100,
+            2,
+            MidpointRounding.AwayFromZero);
+    }
+
+    // Discounted line total.
+    private decimal GetEditedLineTotal(EditableInvoiceItem item)
+    {
+        return GetEditedOriginalLineTotal(item) -
+               GetEditedItemDiscount(item);
+    }
+
+    // Preview calculations while editing.
+    private decimal EditedOriginalSubtotal =>
+        editItems.Sum(GetEditedOriginalLineTotal);
+
+    private decimal EditedItemDiscounts =>
+        editItems.Sum(GetEditedItemDiscount);
+
+    private decimal EditedSubtotal =>
+        editItems.Sum(GetEditedLineTotal);
+
+    private decimal EditedInvoiceDiscountAmount =>
+        decimal.Round(
+            EditedSubtotal * editedInvoiceDiscountPercent / 100,
+            2,
+            MidpointRounding.AwayFromZero);
+
+    // Apply rounding only to the editing preview. The API saves the final result.
+    private decimal EditedTotalBeforeRounding =>
+        EditedSubtotal - EditedInvoiceDiscountAmount;
+
+    private decimal EditedRoundingDiscount =>
+        EditedTotalBeforeRounding - decimal.Floor(EditedTotalBeforeRounding);
+
+    private decimal CalculateTotal()
+    {
+        return decimal.Floor(EditedTotalBeforeRounding);
+    }
+
+    // Calculations using the invoice saved in the database.
+    private decimal SavedOriginalSubtotal =>
+        invoice?.Items.Sum(item =>
+            item.UnitPrice * item.Quantity) ?? 0;
+
+    private decimal SavedSubtotal =>
+        invoice?.Items.Sum(item => item.LineTotal) ?? 0;
+
+    private decimal SavedItemDiscounts =>
+        SavedOriginalSubtotal - SavedSubtotal;
+
+    private decimal SavedInvoiceDiscountAmount =>
+        invoice == null ? 0 : decimal.Round(
+            SavedSubtotal * invoice.DiscountPercent / 100,
+            2,
+            MidpointRounding.AwayFromZero);
+
+    // Show the original calculated total, while keeping the saved adjustment
+    // from SQL Server unchanged until the invoice is edited and saved.
+    private decimal SavedTotalBeforeRounding =>
+        SavedSubtotal - SavedInvoiceDiscountAmount;
+
+    private bool IsValidDiscount(decimal discount)
+    {
+        return discount >= 0 &&
+               discount <= 100 &&
+               decimal.Round(discount, 2) == discount;
+    }
+
+    private void AddProduct()
+    {
+        errorMessage = "";
+
+        var product = products.FirstOrDefault(
+            p => p.ProductId == selectedProductId);
+
+        if (product == null)
+        {
+            errorMessage = "Please select a product.";
+            return;
+        }
+
+        if (newProductQuantity <= 0)
+        {
+            errorMessage = "Quantity must be greater than zero.";
+            return;
+        }
+
+        if (editItems.Any(i => i.ProductId == selectedProductId))
+        {
+            errorMessage =
+                "This product is already on the invoice.";
+            return;
+        }
+
+        editItems.Add(new EditableInvoiceItem
+        {
+            InvoiceItemId = 0,
+            ProductId = product.ProductId,
+            ProductName = product.Name,
+            Quantity = newProductQuantity,
+            UnitPrice = product.Price,
+            DiscountPercent = 0
+        });
+
+        selectedProductId = 0;
+        newProductQuantity = 1;
+    }
+
+    private void RemoveItem(EditableInvoiceItem item)
+    {
+        errorMessage = "";
+        editItems.Remove(item);
+    }
+
+    private void CancelEditing()
+    {
+        editItems.Clear();
+        isEditing = false;
+        errorMessage = "";
+    }
+
+    // Save price, quantity, product and discount changes together.
+    private async Task SaveChanges()
+    {
+        if (invoice == null || !isEditing || isSaving || isDeleting)
+        {
+            return;
+        }
+
+        errorMessage = "";
+        successMessage = "";
+
+        if (editItems.Count == 0)
+        {
+            errorMessage =
+                "An invoice must contain at least one product.";
+            return;
+        }
+
+        if (!IsValidDiscount(editedInvoiceDiscountPercent))
+        {
+            errorMessage =
+                "Invoice discount must be between 0 and 100 with at most two decimal places.";
+            return;
+        }
+
+        if (editItems.Any(item =>
+            item.Quantity <= 0 ||
+            item.UnitPrice < 0 ||
+            decimal.Round(item.UnitPrice, 2) != item.UnitPrice ||
+            !IsValidDiscount(item.DiscountPercent)))
+        {
+            errorMessage =
+                "Check quantities, prices and discounts. Quantities must be positive, prices non-negative, and discounts between 0 and 100%.";
+            return;
+        }
+
+        var request = new
+        {
+            DiscountPercent = editedInvoiceDiscountPercent,
+
+            Items = editItems.Select(item => new
+            {
+                item.InvoiceItemId,
+                item.ProductId,
+                item.Quantity,
+                item.DiscountPercent,
+
+                // New products use their current catalog price.
+                UnitPrice = item.InvoiceItemId == 0
+                    ? (decimal?)null
+                    : item.UnitPrice
+            }).ToList()
+        };
+
+        isSaving = true;
+
+        try
+        {
+            var response = await Api.PutAsJsonAsync(
+                $"api/invoices/{invoice.InvoiceId}", request);
+
+            if (!response.IsSuccessStatusCode)
+            {
+                errorMessage =
+                    await response.Content.ReadAsStringAsync();
+                return;
+            }
+
+            var updatedInvoice = await Api.GetFromJsonAsync<InvoiceDto>(
+                $"api/invoices/{invoice.InvoiceId}");
+
+            if (updatedInvoice == null)
+            {
+                errorMessage =
+                    "Invoice saved, but could not reload its details.";
+                return;
+            }
+
+            invoice = updatedInvoice;
+            editItems.Clear();
+            isEditing = false;
+
+            successMessage = "Invoice updated successfully.";
+        }
+        catch (Exception ex)
+        {
+            errorMessage =
+                "Could not save or reload the invoice: " + ex.Message;
+        }
+        finally
+        {
+            isSaving = false;
+        }
+    }
+
+    private void ShowDeleteConfirmation()
+    {
+        errorMessage = "";
+        successMessage = "";
+        showDeleteConfirmation = true;
+    }
+
+    private void CancelDeletion()
+    {
+        showDeleteConfirmation = false;
+    }
+
+    private async Task DeleteInvoice()
+    {
+        if (invoice == null || isDeleting || isSaving ||
+            !showDeleteConfirmation)
+        {
+            return;
+        }
+
+        errorMessage = "";
+        successMessage = "";
+        isDeleting = true;
+
+        try
+        {
+            int idToDelete = invoice.InvoiceId;
+            string numberToDelete = invoice.InvoiceNumber;
+
+            var response = await Api.DeleteAsync(
+                $"api/invoices/{idToDelete}");
+
+            if (!response.IsSuccessStatusCode)
+            {
+                errorMessage =
+                    await response.Content.ReadAsStringAsync();
+                return;
+            }
+
+            invoice = null;
+            editItems.Clear();
+            isEditing = false;
+            showDeleteConfirmation = false;
+
+            successMessage =
+                $"Invoice {numberToDelete} deleted successfully.";
+        }
+        catch (Exception ex)
+        {
+            errorMessage =
+                "Could not delete invoice: " + ex.Message;
+        }
+        finally
+        {
+            isDeleting = false;
+        }
+    }
+
+    public class InvoiceDto
+    {
+        public int InvoiceId { get; set; }
+        public string InvoiceNumber { get; set; } = "";
+        public DateTime InvoiceDate { get; set; }
+        public int CustomerId { get; set; }
+        public string CustomerName { get; set; } = "";
+
+        public decimal DiscountPercent { get; set; }
+        public decimal RoundingDiscount { get; set; }
+        public decimal TotalAmount { get; set; }
+
+        public List<InvoiceItemDto> Items { get; set; } = new();
+    }
+
+    public class InvoiceItemDto
+    {
+        public int InvoiceItemId { get; set; }
+        public int ProductId { get; set; }
+        public string ProductName { get; set; } = "";
+        public int Quantity { get; set; }
+        public decimal UnitPrice { get; set; }
+
+        public decimal DiscountPercent { get; set; }
+        public decimal LineTotal { get; set; }
+    }
+
+    public class ProductDto
+    {
+        public int ProductId { get; set; }
+        public string Name { get; set; } = "";
+        public decimal Price { get; set; }
+    }
+
+    public class EditableInvoiceItem
+    {
+        public int InvoiceItemId { get; set; }
+        public int ProductId { get; set; }
+        public string ProductName { get; set; } = "";
+        public int Quantity { get; set; }
+        public decimal UnitPrice { get; set; }
+
+        public decimal DiscountPercent { get; set; }
+    }
+}

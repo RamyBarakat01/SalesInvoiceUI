@@ -1,0 +1,40 @@
+﻿
+@page "/"
+
+<PageTitle>Dashboard</PageTitle>
+
+<h1>Sales Dashboard</h1>
+
+<p class="text-muted">
+    Welcome to the Sales Invoice Management System.
+</p>
+
+<div class="row g-4 mt-3">
+
+    <div class="col-md-6">
+        <div class="card shadow-sm p-4">
+            <h5>Create Sales Invoice</h5>
+            <p class="text-muted">
+                Create new invoices for customers using
+                products from the database.
+            </p>
+            <a href="/create-invoice" class="btn btn-primary">
+                Create Invoice
+            </a>
+        </div>
+    </div>
+
+    <div class="col-md-6">
+        <div class="card shadow-sm p-4">
+            <h5>Sales Reports</h5>
+            <p class="text-muted">
+                View transactions, filter by customer
+                and date, and check sales totals.
+            </p>
+            <a href="/sales-reports" class="btn btn-outline-primary">
+                View Reports
+            </a>
+        </div>
+    </div>
+
+</div>
