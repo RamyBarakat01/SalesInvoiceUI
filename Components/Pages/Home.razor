@@ -1,40 +1,377 @@
-﻿
-@page "/"
+﻿@page "/"
+@rendermode InteractiveServer
+@using System.Net.Http.Json
+@using System.Text.Json
+@inject IHttpClientFactory HttpClientFactory
 
-<PageTitle>Dashboard</PageTitle>
+<PageTitle>Business Dashboard</PageTitle>
 
-<h1>Sales Dashboard</h1>
+<div class="d-flex justify-content-between align-items-center mb-3">
+    <div>
+        <h1>Business Dashboard</h1>
+        <p class="text-muted mb-0">Sales, purchases, and inventory overview.</p>
+    </div>
+    <button class="btn btn-outline-primary" disabled="@isLoading" @onclick="LoadDashboardAsync">
+        @(isLoading ? "Loading..." : "Refresh")
+    </button>
+</div>
 
-<p class="text-muted">
-    Welcome to the Sales Invoice Management System.
+@if (errors.Count > 0)
+{
+    <div class="alert alert-warning">
+        @foreach (var error in errors)
+        {
+            <div>@error</div>
+        }
+    </div>
+}
+
+<div class="row g-3 mt-2 mb-4">
+    <div class="col-md-6 col-xl-3">
+        <div class="card shadow-sm h-100 p-3">
+            <p class="text-muted mb-2">Net Sales</p>
+            <h4 class="text-primary">@Money(sales?.TotalSalesAmount)</h4>
+            <small class="text-muted">
+                @(sales == null ? "Data unavailable" : $"{sales.TotalInvoices} active invoices")
+            </small>
+        </div>
+    </div>
+
+    <div class="col-md-6 col-xl-3">
+        <div class="card shadow-sm h-100 p-3">
+            <p class="text-muted mb-2">Net Purchases</p>
+            <h4>@Money(purchases?.TotalPurchaseAmount)</h4>
+            <small class="text-muted">
+                @(purchases == null ? "Data unavailable" : $"{purchases.TotalPurchaseInvoices} purchase invoices")
+            </small>
+        </div>
+    </div>
+
+    <div class="col-md-6 col-xl-3">
+        <div class="card shadow-sm h-100 p-3">
+            <p class="text-muted mb-2">Inventory Value</p>
+            <h4>@Money(inventoryValue)</h4>
+            <small class="text-muted">
+                @(inventoryUnits.HasValue ? $"{inventoryUnits.Value} units in stock" : "Data unavailable")
+            </small>
+        </div>
+    </div>
+
+    <div class="col-md-6 col-xl-3">
+        <div class="card shadow-sm h-100 p-3">
+            <p class="text-muted mb-2">Gross Profit</p>
+            @if (sales == null)
+            {
+                <h4 class="text-secondary">Unavailable</h4>
+                <small class="text-muted">Sales report could not be loaded.</small>
+            }
+            else if (!sales.HasCompleteCostData || !sales.TotalGrossProfit.HasValue)
+            {
+                <h4 class="text-secondary">Unavailable</h4>
+                <small class="text-muted">
+                    @sales.InvoicesWithMissingCosts invoice(s) missing historical costs.
+                </small>
+            }
+            else
+            {
+                <h4 class="@(sales.TotalGrossProfit.Value >= 0 ? "text-success" : "text-danger")">
+                    @Money(sales.TotalGrossProfit)
+                </h4>
+                <small class="text-muted">
+                    Margin: @(sales.TotalGrossProfitMargin?.ToString("N2") ?? "—")%
+                </small>
+            }
+        </div>
+    </div>
+</div>
+
+<h4 class="mb-3">Quick Actions</h4>
+<div class="row g-3 mb-4">
+    <div class="col-md-6 col-xl-3">
+        <div class="card shadow-sm h-100 p-3">
+            <h6>Create Sales Invoice</h6>
+            <p class="text-muted small">Record a customer sale.</p>
+            <a href="/create-invoice" class="btn btn-primary mt-auto">Create Sale</a>
+        </div>
+    </div>
+    <div class="col-md-6 col-xl-3">
+        <div class="card shadow-sm h-100 p-3">
+            <h6>Create Purchase Invoice</h6>
+            <p class="text-muted small">Purchase stock from a vendor.</p>
+            <a href="/create-purchase-invoice" class="btn btn-primary mt-auto">Create Purchase</a>
+        </div>
+    </div>
+    <div class="col-md-6 col-xl-3">
+        <div class="card shadow-sm h-100 p-3">
+            <h6>Inventory</h6>
+            <p class="text-muted small">View inventory and valuation.</p>
+            <a href="/inventory" class="btn btn-outline-primary mt-auto">View Inventory</a>
+        </div>
+    </div>
+    <div class="col-md-6 col-xl-3">
+        <div class="card shadow-sm h-100 p-3">
+            <h6>Reports</h6>
+            <p class="text-muted small">Review sales and purchasing.</p>
+            <div class="d-grid gap-2 mt-auto">
+                <a href="/sales-reports" class="btn btn-outline-primary">Sales Reports</a>
+                <a href="/purchase-reports" class="btn btn-outline-primary">Purchase Reports</a>
+            </div>
+        </div>
+    </div>
+</div>
+
+<div class="row g-4 mb-4">
+    <div class="col-lg-6">
+        <div class="card shadow-sm h-100 p-3">
+            <div class="d-flex justify-content-between align-items-center mb-3">
+                <h5 class="mb-0">Recent Sales</h5>
+                <a href="/sales-reports" class="btn btn-sm btn-outline-primary">View All</a>
+            </div>
+            @if (sales == null)
+            {
+                <p class="text-muted">Sales information unavailable.</p>
+            }
+            else if (sales.Transactions.Count == 0)
+            {
+                <p class="text-muted">No sales transactions found.</p>
+            }
+            else
+            {
+                <div class="table-responsive">
+                    <table class="table table-sm align-middle">
+                        <thead><tr><th>Invoice</th><th>Date</th><th class="text-end">Amount</th></tr></thead>
+                        <tbody>
+                            @foreach (var sale in sales.Transactions.OrderByDescending(s => s.InvoiceDate).Take(5))
+                            {
+                                <tr>
+                                    <td>
+                                        <a href="@($"/invoice-details?id={sale.InvoiceId}")">@sale.InvoiceNumber</a>
+                                    </td>
+                                    <td>@sale.InvoiceDate.ToString("dd MMM yyyy")</td>
+                                    <td class="text-end">@sale.TotalAmount.ToString("N2")</td>
+                                </tr>
+                            }
+                        </tbody>
+                    </table>
+                </div>
+            }
+        </div>
+    </div>
+
+    <div class="col-lg-6">
+        <div class="card shadow-sm h-100 p-3">
+            <div class="d-flex justify-content-between align-items-center mb-3">
+                <h5 class="mb-0">Recent Purchases</h5>
+                <a href="/purchase-reports" class="btn btn-sm btn-outline-primary">View All</a>
+            </div>
+            @if (purchases == null)
+            {
+                <p class="text-muted">Purchase information unavailable.</p>
+            }
+            else if (purchases.Transactions.Count == 0)
+            {
+                <p class="text-muted">No purchase transactions found.</p>
+            }
+            else
+            {
+                <div class="table-responsive">
+                    <table class="table table-sm align-middle">
+                        <thead><tr><th>Invoice</th><th>Date</th><th class="text-end">Amount</th></tr></thead>
+                        <tbody>
+                            @foreach (var purchase in purchases.Transactions.OrderByDescending(p => p.PurchaseDate).Take(5))
+                            {
+                                <tr>
+                                    <td>
+                                        <a href="@($"/purchase-invoice-details?id={purchase.PurchaseInvoiceId}")">@purchase.PurchaseInvoiceNumber</a>
+                                    </td>
+                                    <td>@purchase.PurchaseDate.ToString("dd MMM yyyy")</td>
+                                    <td class="text-end">@purchase.TotalAmount.ToString("N2")</td>
+                                </tr>
+                            }
+                        </tbody>
+                    </table>
+                </div>
+            }
+        </div>
+    </div>
+</div>
+
+<p class="text-muted small">
+    Figures cover all available reporting history. Cancelled sales are excluded.
+    Purchases are not subtracted directly from sales to calculate gross profit.
 </p>
 
-<div class="row g-4 mt-3">
+@code {
+    private SalesReportDto? sales;
+    private PurchaseReportDto? purchases;
+    private decimal? inventoryValue;
+    private int? inventoryUnits;
+    private bool isLoading;
+    private List<string> errors = new();
 
-    <div class="col-md-6">
-        <div class="card shadow-sm p-4">
-            <h5>Create Sales Invoice</h5>
-            <p class="text-muted">
-                Create new invoices for customers using
-                products from the database.
-            </p>
-            <a href="/create-invoice" class="btn btn-primary">
-                Create Invoice
-            </a>
-        </div>
-    </div>
+    private HttpClient Api => HttpClientFactory.CreateClient("SalesInvoiceAPI");
 
-    <div class="col-md-6">
-        <div class="card shadow-sm p-4">
-            <h5>Sales Reports</h5>
-            <p class="text-muted">
-                View transactions, filter by customer
-                and date, and check sales totals.
-            </p>
-            <a href="/sales-reports" class="btn btn-outline-primary">
-                View Reports
-            </a>
-        </div>
-    </div>
+    protected override async Task OnInitializedAsync() => await LoadDashboardAsync();
 
-</div>
+    private static string Money(decimal? amount) =>
+        amount.HasValue ? $"EGP {amount.Value:N2}" : "Unavailable";
+
+    private async Task LoadDashboardAsync()
+    {
+        if (isLoading) return;
+        isLoading = true;
+        errors.Clear();
+
+        try
+        {
+            try
+            {
+                sales = await Api.GetFromJsonAsync<SalesReportDto>("api/reports/sales");
+                if (sales == null) errors.Add("Sales report returned no data.");
+            }
+            catch (Exception ex)
+            {
+                sales = null;
+                errors.Add("Sales: " + ex.Message);
+            }
+
+            try
+            {
+                purchases = await Api.GetFromJsonAsync<PurchaseReportDto>("api/reports/purchases");
+                if (purchases == null) errors.Add("Purchase report returned no data.");
+            }
+            catch (Exception ex)
+            {
+                purchases = null;
+                errors.Add("Purchases: " + ex.Message);
+            }
+
+            try
+            {
+                using var response = await Api.GetAsync("api/inventory");
+                response.EnsureSuccessStatusCode();
+                using var document = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
+                var root = document.RootElement;
+
+                inventoryValue = null;
+                inventoryUnits = null;
+
+                if (TryNumber(root, "totalInventoryValue", out decimal totalValue))
+                    inventoryValue = totalValue;
+                if (TryNumber(root, "totalUnits", out decimal totalUnits))
+                    inventoryUnits = (int)totalUnits;
+
+                JsonElement items = default;
+                if (root.ValueKind == JsonValueKind.Array)
+                    items = root;
+                else if (TryProperty(root, "products", out var productItems) &&
+                         productItems.ValueKind == JsonValueKind.Array)
+                    items = productItems;
+
+                if (items.ValueKind == JsonValueKind.Array)
+                {
+                    decimal calculatedValue = 0;
+                    int calculatedUnits = 0;
+                    bool hasCompleteProducts = true;
+
+                    foreach (var product in items.EnumerateArray())
+                    {
+                        if (!TryNumber(product, "stockQuantity", out decimal quantity))
+                        {
+                            hasCompleteProducts = false;
+                            continue;
+                        }
+
+                        calculatedUnits += (int)quantity;
+                        if (TryNumber(product, "inventoryValue", out decimal lineValue))
+                            calculatedValue += lineValue;
+                        else if (TryNumber(product, "averageCost", out decimal averageCost))
+                            calculatedValue += quantity * averageCost;
+                        else
+                            hasCompleteProducts = false;
+                    }
+
+                    if (hasCompleteProducts)
+                    {
+                        inventoryUnits ??= calculatedUnits;
+                        inventoryValue ??= calculatedValue;
+                    }
+                }
+
+                if (!inventoryValue.HasValue)
+                    errors.Add("Inventory response did not provide a recognized valuation.");
+            }
+            catch (Exception ex)
+            {
+                inventoryValue = null;
+                inventoryUnits = null;
+                errors.Add("Inventory: " + ex.Message);
+            }
+        }
+        finally
+        {
+            isLoading = false;
+        }
+    }
+
+    private static bool TryProperty(JsonElement element, string name, out JsonElement value)
+    {
+        if (element.ValueKind == JsonValueKind.Object)
+        {
+            foreach (var property in element.EnumerateObject())
+            {
+                if (string.Equals(property.Name, name, StringComparison.OrdinalIgnoreCase))
+                {
+                    value = property.Value;
+                    return true;
+                }
+            }
+        }
+        value = default;
+        return false;
+    }
+
+    private static bool TryNumber(JsonElement element, string name, out decimal value)
+    {
+        value = 0;
+        return TryProperty(element, name, out var property) &&
+               property.ValueKind == JsonValueKind.Number &&
+               property.TryGetDecimal(out value);
+    }
+
+    public class SalesReportDto
+    {
+        public List<SalesTransactionDto> Transactions { get; set; } = new();
+        public decimal TotalSalesAmount { get; set; }
+        public int TotalInvoices { get; set; }
+        public decimal? TotalCostOfGoodsSold { get; set; }
+        public decimal? TotalGrossProfit { get; set; }
+        public decimal? TotalGrossProfitMargin { get; set; }
+        public bool HasCompleteCostData { get; set; }
+        public int InvoicesWithKnownCosts { get; set; }
+        public int InvoicesWithMissingCosts { get; set; }
+    }
+
+    public class SalesTransactionDto
+    {
+        public int InvoiceId { get; set; }
+        public string InvoiceNumber { get; set; } = "";
+        public DateTime InvoiceDate { get; set; }
+        public decimal TotalAmount { get; set; }
+    }
+
+    public class PurchaseReportDto
+    {
+        public List<PurchaseTransactionDto> Transactions { get; set; } = new();
+        public decimal TotalPurchaseAmount { get; set; }
+        public int TotalPurchaseInvoices { get; set; }
+    }
+
+    public class PurchaseTransactionDto
+    {
+        public int PurchaseInvoiceId { get; set; }
+        public string PurchaseInvoiceNumber { get; set; } = "";
+        public DateTime PurchaseDate { get; set; }
+        public decimal TotalAmount { get; set; }
+    }
+}

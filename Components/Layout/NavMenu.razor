@@ -1,4 +1,4 @@
-﻿
+
 <div class="top-row ps-3 navbar navbar-dark">
     <div class="container-fluid">
         <a class="navbar-brand" href="">Sales Invoice Management</a>
@@ -10,6 +10,7 @@
 <div class="nav-scrollable" onclick="document.querySelector('.navbar-toggler').click()">
     <nav class="nav flex-column">
 
+        <!-- Dashboard -->
         <div class="nav-item px-3">
             <NavLink class="nav-link" href="/" Match="NavLinkMatch.All">
                 <span class="bi bi-house-door-fill-nav-menu" aria-hidden="true"></span>
@@ -17,6 +18,7 @@
             </NavLink>
         </div>
 
+        <!-- Create Sales Invoice -->
         <div class="nav-item px-3">
             <NavLink class="nav-link" href="/create-invoice">
                 <span class="bi bi-plus-square-fill-nav-menu" aria-hidden="true"></span>
@@ -24,6 +26,7 @@
             </NavLink>
         </div>
 
+        <!-- Sales Invoice Details -->
         <div class="nav-item px-3">
             <NavLink class="nav-link" href="/invoice-details">
                 <span class="bi bi-list-nested-nav-menu" aria-hidden="true"></span>
@@ -31,10 +34,60 @@
             </NavLink>
         </div>
 
+
+        <!-- Sales Reports -->
         <div class="nav-item px-3">
             <NavLink class="nav-link" href="/sales-reports">
                 <span class="bi bi-bar-chart-fill-nav-menu" aria-hidden="true"></span>
                 Sales Reports
+            </NavLink>
+        </div>
+
+
+        <!-- Create Purchase Invoice -->
+        <div class="nav-item px-3">
+            <NavLink class="nav-link" href="/create-purchase-invoice">
+                <span class="bi bi-plus-square-fill-nav-menu" aria-hidden="true"></span>
+                Create Purchase Invoice
+            </NavLink>
+        </div>
+
+        <!-- Purchase Invoice Details -->
+        <div class="nav-item px-3">
+            <NavLink class="nav-link" href="/purchase-invoice-details">
+                <span class="bi bi-list-nested-nav-menu" aria-hidden="true"></span>
+                Purchase Invoice Details
+            </NavLink>
+        </div>
+
+        <div class="nav-item px-3">
+            <NavLink class="nav-link" href="purchase-reports">
+                <span class="bi bi-bar-chart-fill-nav-menu" aria-hidden="true"></span>
+                Purchase Reports
+            </NavLink>
+        </div>
+
+        <!-- Inventory Dashboard -->
+        <div class="nav-item px-3">
+            <NavLink class="nav-link" href="/inventory" Match="NavLinkMatch.All">
+                <span class="bi bi-list-nested-nav-menu" aria-hidden="true"></span>
+                Inventory Dashboard
+            </NavLink>
+        </div>
+
+        <!-- Stock Movement History -->
+        <div class="nav-item px-3">
+            <NavLink class="nav-link" href="/inventory/movements">
+                <span class="bi bi-list-nested-nav-menu" aria-hidden="true"></span>
+                Stock Movement History
+            </NavLink>
+        </div>
+
+        <!-- Inventory Adjustments -->
+        <div class="nav-item px-3">
+            <NavLink Class="nav-link" href="/inventory/adjustments">
+                <span class="bi bi-plus-square-fill-nav-menu" aria-hodden="true"></span>
+                Inventory Adjustments
             </NavLink>
         </div>
 

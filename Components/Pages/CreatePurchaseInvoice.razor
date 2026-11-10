@@ -1,0 +1,578 @@
+
+@page "/create-purchase-invoice"
+@rendermode InteractiveServer
+@using System.Net.Http.Json
+@inject IHttpClientFactory HttpClientFactory
+
+<PageTitle>Create Purchase Invoice</PageTitle>
+
+<h1>Create Purchase Invoice</h1>
+<p class="text-muted">
+    Record vendor purchases, apply discounts, and update inventory.
+</p>
+
+@if (!string.IsNullOrWhiteSpace(errorMessage))
+{
+    <div class="alert alert-danger">@errorMessage</div>
+}
+
+@if (!string.IsNullOrWhiteSpace(successMessage))
+{
+    <div class="alert alert-success">@successMessage</div>
+}
+
+@if (isLoading)
+{
+    <p>Loading vendors and products...</p>
+}
+else
+{
+    <!-- VENDOR INFORMATION -->
+    <div class="card p-4 mb-4 shadow-sm">
+
+        <h4>Vendor Information</h4>
+
+        <label class="form-label mt-3">Select Vendor</label>
+
+        <select class="form-select"
+                @bind="selectedVendorId"
+                disabled="@isSaving">
+
+            <option value="0">-- Choose a vendor --</option>
+
+            @foreach (var vendor in vendors)
+            {
+                <option value="@vendor.VendorId">
+                    @vendor.Name
+                </option>
+            }
+        </select>
+
+        @if (vendors.Count == 0)
+        {
+            <p class="text-muted mt-2 mb-0">
+                No vendors found. Add a vendor through the API.
+            </p>
+        }
+    </div>
+
+    <!-- PURCHASED PRODUCTS -->
+    <div class="card p-4 mb-4 shadow-sm">
+
+        <h4>Purchased Products</h4>
+
+        <p class="text-muted">
+            Enter product quantities, unit costs, and item discounts.
+        </p>
+
+        @foreach (var line in purchaseLines)
+        {
+            <div class="border rounded p-3 mb-3" @key="line">
+
+                <div class="row g-3 align-items-end">
+
+                    <div class="col-md-4">
+                        <label class="form-label">Product</label>
+
+                        <select class="form-select"
+                                @bind="line.ProductId"
+                                disabled="@isSaving">
+
+                            <option value="0">
+                                -- Choose a product --
+                            </option>
+
+                            @foreach (var product in products)
+                            {
+                                <option value="@product.ProductId">
+                                    @product.Name
+                                </option>
+                            }
+                        </select>
+                    </div>
+
+                    <div class="col-md-2">
+                        <label class="form-label">Quantity</label>
+
+                        <input type="number"
+                               min="1"
+                               step="1"
+                               class="form-control"
+                               @bind="line.Quantity"
+                               @bind:event="oninput"
+                               disabled="@isSaving" />
+                    </div>
+
+                    <div class="col-md-3">
+                        <label class="form-label">
+                            Unit Cost (EGP)
+                        </label>
+
+                        <input type="number"
+                               min="0"
+                               step="0.0001"
+                               class="form-control"
+                               @bind="line.UnitCost"
+                               @bind:event="oninput"
+                               disabled="@isSaving" />
+                    </div>
+
+                    <div class="col-md-3">
+                        <label class="form-label">
+                            Item Discount %
+                        </label>
+
+                        <input type="number"
+                               min="0"
+                               max="100"
+                               step="0.01"
+                               class="form-control"
+                               @bind="line.DiscountPercent"
+                               @bind:event="oninput"
+                               disabled="@isSaving" />
+                    </div>
+
+                </div>
+
+                <div class="row g-3 align-items-end mt-1">
+
+                    <div class="col-md-4">
+                        <small class="text-muted">
+                            Original Line Total
+                        </small>
+
+                        <div>
+                            EGP @GetOriginalLineTotal(line).ToString("N2")
+                        </div>
+                    </div>
+
+                    <div class="col-md-3">
+                        <small class="text-muted">
+                            Item Discount
+                        </small>
+
+                        <div class="text-success">
+                            - EGP @GetItemDiscount(line).ToString("N2")
+                        </div>
+                    </div>
+
+                    <div class="col-md-3">
+                        <small class="text-muted">
+                            After Item Discount
+                        </small>
+
+                        <div>
+                            <strong>
+                                EGP @GetLineTotal(line).ToString("N2")
+                            </strong>
+                        </div>
+                    </div>
+
+                    <div class="col-md-2">
+                        <button class="btn btn-outline-danger w-100"
+                                disabled="@isSaving"
+                                @onclick="() => RemoveLine(line)">
+                            Remove
+                        </button>
+                    </div>
+
+                </div>
+
+            </div>
+        }
+
+        <button class="btn btn-outline-primary"
+                disabled="@isSaving"
+                @onclick="AddLine">
+            + Add Product
+        </button>
+
+    </div>
+
+    <!-- PURCHASE SUMMARY -->
+    <div class="card p-4 shadow-sm">
+
+        <h4>Purchase Summary</h4>
+        <hr />
+
+        <div class="d-flex justify-content-between mb-2">
+            <span>Number of Product Lines</span>
+            <strong>@purchaseLines.Count</strong>
+        </div>
+
+        <div class="d-flex justify-content-between mb-2">
+            <span>Subtotal Before Discounts</span>
+            <span>EGP @OriginalSubtotal.ToString("N2")</span>
+        </div>
+
+        <div class="d-flex justify-content-between mb-2">
+            <span>Total Item Discounts</span>
+
+            <span class="text-success">
+                - EGP @TotalItemDiscounts.ToString("N2")
+            </span>
+        </div>
+
+        <div class="d-flex justify-content-between mb-3">
+            <span>Subtotal After Item Discounts</span>
+
+            <strong>
+                EGP @SubtotalAfterItemDiscounts.ToString("N2")
+            </strong>
+        </div>
+
+        <hr />
+
+        <div class="row align-items-end mb-3">
+
+            <div class="col-md-4">
+                <label class="form-label">
+                    Invoice Discount %
+                </label>
+
+                <input type="number"
+                       min="0"
+                       max="100"
+                       step="0.01"
+                       class="form-control"
+                       @bind="invoiceDiscountPercent"
+                       @bind:event="oninput"
+                       disabled="@isSaving" />
+            </div>
+
+            <div class="col-md-8">
+                <div class="d-flex justify-content-between mt-3">
+
+                    <span>Invoice Discount Amount</span>
+
+                    <span class="text-success">
+                        - EGP @InvoiceDiscountAmount.ToString("N2")
+                    </span>
+
+                </div>
+            </div>
+
+        </div>
+
+        <div class="d-flex justify-content-between mb-2">
+            <span>Total Before Rounding</span>
+            <span>EGP @TotalBeforeRounding.ToString("N2")</span>
+        </div>
+
+        <div class="d-flex justify-content-between mb-2">
+            <span>Automatic Rounding Discount</span>
+
+            <span class="text-success">
+                - EGP @RoundingDiscount.ToString("N2")
+            </span>
+        </div>
+
+        <div class="d-flex justify-content-between mb-2">
+            <strong>Total Discount (%)</strong>
+
+            <strong class="text-success">
+                @TotalDiscountPercent.ToString("N2")%
+            </strong>
+        </div>
+
+        <hr />
+
+        <div class="d-flex justify-content-between">
+            <h5>Final Purchase Total</h5>
+
+            <h4 class="text-primary">
+                EGP @PurchaseTotal.ToString("N2")
+            </h4>
+        </div>
+
+        <p class="text-muted mt-3 mb-0">
+            Posting a purchase increases inventory and updates
+            weighted average costs using discounted acquisition costs.
+        </p>
+
+        <button class="btn btn-primary btn-lg mt-3"
+                disabled="@(isSaving || vendors.Count == 0 || products.Count == 0)"
+                @onclick="CreatePurchaseAsync">
+
+            @(isSaving ? "Posting..." : "Create & Post Purchase Invoice")
+        </button>
+
+    </div>
+}
+
+@code {
+    private List<VendorDto> vendors = new();
+    private List<ProductDto> products = new();
+    private List<PurchaseLine> purchaseLines = new();
+
+    private int selectedVendorId;
+    private decimal invoiceDiscountPercent;
+
+    private bool isLoading = true;
+    private bool isSaving;
+
+    private string errorMessage = "";
+    private string successMessage = "";
+
+    private HttpClient Api =>
+        HttpClientFactory.CreateClient("SalesInvoiceAPI");
+
+    protected override async Task OnInitializedAsync()
+    {
+        try
+        {
+            vendors = await Api
+                .GetFromJsonAsync<List<VendorDto>>("api/vendors")
+                ?? new();
+
+            products = await Api
+                .GetFromJsonAsync<List<ProductDto>>("api/products")
+                ?? new();
+
+            purchaseLines.Add(new PurchaseLine());
+        }
+        catch (Exception ex)
+        {
+            errorMessage =
+                "Could not load vendors or products: " + ex.Message;
+        }
+        finally
+        {
+            isLoading = false;
+        }
+    }
+
+    private void AddLine()
+    {
+        purchaseLines.Add(new PurchaseLine());
+    }
+
+    private void RemoveLine(PurchaseLine line)
+    {
+        purchaseLines.Remove(line);
+    }
+
+    // ORIGINAL LINE AMOUNT
+    private static decimal GetOriginalLineTotal(PurchaseLine line)
+    {
+        return decimal.Round(
+            line.UnitCost * line.Quantity,
+            2,
+            MidpointRounding.AwayFromZero);
+    }
+
+    // INDIVIDUAL ITEM DISCOUNT
+    private static decimal GetItemDiscount(PurchaseLine line)
+    {
+        return decimal.Round(
+            GetOriginalLineTotal(line) *
+            line.DiscountPercent / 100,
+            2,
+            MidpointRounding.AwayFromZero);
+    }
+
+    // LINE TOTAL AFTER ITEM DISCOUNT
+    private static decimal GetLineTotal(PurchaseLine line)
+    {
+        return GetOriginalLineTotal(line) -
+               GetItemDiscount(line);
+    }
+
+    // PURCHASE TOTAL CALCULATIONS
+    private decimal OriginalSubtotal =>
+        purchaseLines.Sum(GetOriginalLineTotal);
+
+    private decimal TotalItemDiscounts =>
+        purchaseLines.Sum(GetItemDiscount);
+
+    private decimal SubtotalAfterItemDiscounts =>
+        purchaseLines.Sum(GetLineTotal);
+
+    private decimal InvoiceDiscountAmount =>
+        decimal.Round(
+            SubtotalAfterItemDiscounts *
+            invoiceDiscountPercent / 100,
+            2,
+            MidpointRounding.AwayFromZero);
+
+    private decimal TotalBeforeRounding =>
+        SubtotalAfterItemDiscounts - InvoiceDiscountAmount;
+
+    private decimal RoundingDiscount =>
+        TotalBeforeRounding - decimal.Floor(TotalBeforeRounding);
+
+    private decimal PurchaseTotal =>
+        decimal.Floor(TotalBeforeRounding);
+
+    private decimal TotalDiscountPercent =>
+        OriginalSubtotal > 0
+            ? decimal.Round(
+                (OriginalSubtotal - PurchaseTotal) /
+                OriginalSubtotal * 100,
+                2,
+                MidpointRounding.AwayFromZero)
+            : 0;
+
+    private static bool IsValidDiscount(decimal discount)
+    {
+        return discount >= 0 &&
+               discount <= 100 &&
+               decimal.Round(discount, 2) == discount;
+    }
+
+    private async Task CreatePurchaseAsync()
+    {
+        if (isSaving)
+        {
+            return;
+        }
+
+        errorMessage = "";
+        successMessage = "";
+
+        // VALIDATE VENDOR
+        if (selectedVendorId <= 0 ||
+            !vendors.Any(v => v.VendorId == selectedVendorId))
+        {
+            errorMessage = "Please select a valid vendor.";
+            return;
+        }
+
+        // VALIDATE INVOICE DISCOUNT
+        if (!IsValidDiscount(invoiceDiscountPercent))
+        {
+            errorMessage =
+                "Invoice discount must be between 0 and 100 with at most two decimal places.";
+            return;
+        }
+
+        // VALIDATE PRODUCTS
+        if (purchaseLines.Count == 0 ||
+            purchaseLines.Any(l =>
+                l.ProductId <= 0 ||
+                !products.Any(p => p.ProductId == l.ProductId) ||
+                l.Quantity <= 0 ||
+                l.UnitCost < 0 ||
+                decimal.Round(l.UnitCost, 4) != l.UnitCost ||
+                !IsValidDiscount(l.DiscountPercent)))
+        {
+            errorMessage =
+                "Check products, quantities, unit costs and item discounts. " +
+                "Quantities must be positive, unit costs non-negative, " +
+                "and discounts between 0 and 100%.";
+            return;
+        }
+
+        // PREVENT DUPLICATE PRODUCTS
+        if (purchaseLines
+            .Select(l => l.ProductId)
+            .Distinct()
+            .Count() != purchaseLines.Count)
+        {
+            errorMessage =
+                "The same product cannot appear twice in one purchase invoice.";
+            return;
+        }
+
+        // BUILD REQUEST
+        var request = new
+        {
+            VendorId = selectedVendorId,
+            DiscountPercent = invoiceDiscountPercent,
+
+            Items = purchaseLines.Select(l => new
+            {
+                l.ProductId,
+                l.Quantity,
+                l.UnitCost,
+                l.DiscountPercent
+            }).ToList()
+        };
+
+        isSaving = true;
+
+        try
+        {
+            var response = await Api.PostAsJsonAsync(
+                "api/purchase-invoices",
+                request);
+
+            if (!response.IsSuccessStatusCode)
+            {
+                errorMessage =
+                    await response.Content.ReadAsStringAsync();
+                return;
+            }
+
+            var result = await response.Content
+                .ReadFromJsonAsync<CreatedPurchaseResponse>();
+
+            if (result is null)
+            {
+                errorMessage =
+                    "The purchase was posted, but the response could not be read. " +
+                    "Check purchase invoices before retrying.";
+                return;
+            }
+
+            successMessage =
+                $"Purchase {result.PurchaseInvoiceNumber} posted successfully! " +
+                $"Total: EGP {result.TotalAmount:N2}. " +
+                $"Total discount: {result.TotalDiscountPercent:N2}%. " +
+                "Inventory updated.";
+
+            // RESET FORM
+            selectedVendorId = 0;
+            invoiceDiscountPercent = 0;
+
+            purchaseLines = new()
+            {
+                new PurchaseLine()
+            };
+        }
+        catch (Exception ex)
+        {
+            errorMessage =
+                "Could not confirm purchase result: " + ex.Message +
+                ". Check purchase invoices before retrying to avoid duplicate stock additions.";
+        }
+        finally
+        {
+            isSaving = false;
+        }
+    }
+
+    public class VendorDto
+    {
+        public int VendorId { get; set; }
+        public string Name { get; set; } = "";
+    }
+
+    public class ProductDto
+    {
+        public int ProductId { get; set; }
+        public string Name { get; set; } = "";
+    }
+
+    public class PurchaseLine
+    {
+        public int ProductId { get; set; }
+
+        public int Quantity { get; set; } = 1;
+
+        public decimal UnitCost { get; set; }
+
+        public decimal DiscountPercent { get; set; }
+    }
+
+    public class CreatedPurchaseResponse
+    {
+        public int PurchaseInvoiceId { get; set; }
+
+        public string PurchaseInvoiceNumber { get; set; } = "";
+
+        public decimal TotalAmount { get; set; }
+
+        public decimal TotalDiscountPercent { get; set; }
+    }
+}

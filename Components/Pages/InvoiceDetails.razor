@@ -48,6 +48,21 @@
             <div>
                 <h3>@invoice.InvoiceNumber</h3>
 
+                @if (invoice.IsCancelled)
+                {
+                    <span class="badge bg-danger mb-2">Cancelled</span>
+                    @if (invoice.CancelledAt.HasValue)
+                    {
+                        <p class="text-muted mb-2">
+                            Cancelled: @invoice.CancelledAt.Value.ToString("dd MMM yyyy HH:mm") UTC
+                        </p>
+                    }
+                }
+                else
+                {
+                    <span class="badge bg-success mb-2">Active</span>
+                }
+
                 <p class="text-muted mb-0">
                     Customer: @invoice.CustomerName
                 </p>
@@ -73,7 +88,7 @@
         <div class="d-flex justify-content-between align-items-center mb-3">
             <h5 class="mb-0">Purchased Products</h5>
 
-            @if (!isEditing)
+            @if (!isEditing && !invoice.IsCancelled)
             {
                 <div class="d-flex gap-2">
                     <button class="btn btn-outline-primary"
@@ -85,11 +100,19 @@
                     <button class="btn btn-outline-danger"
                             disabled="@(isLoading || isDeleting)"
                             @onclick="ShowDeleteConfirmation">
-                        Delete Invoice
+                        Cancel Invoice
                     </button>
                 </div>
             }
         </div>
+
+        @if (invoice.IsCancelled)
+        {
+            <div class="alert alert-secondary">
+                This invoice is cancelled and is kept for historical reference.
+                It cannot be edited or cancelled again.
+            </div>
+        }
 
         <div class="table-responsive">
             <table class="table table-striped">
@@ -345,6 +368,16 @@
                 </span>
             </div>
 
+            <div class="d-flex justify-content-between mb-2">
+                <strong>Total Discount (%)</strong>
+
+                <strong class="text-success">
+                    @(isEditing
+                        ? EditedTotalDiscountPercent.ToString("N2")
+                        : SavedTotalDiscountPercent.ToString("N2"))%
+                </strong>
+            </div>
+
             <hr />
 
             <div class="d-flex justify-content-between">
@@ -375,24 +408,25 @@
             </div>
         }
 
-        @if (showDeleteConfirmation)
+        @if (showDeleteConfirmation && !invoice.IsCancelled)
         {
             <div class="alert alert-warning mt-3">
                 <p>
-                    Are you sure you want to delete invoice
+                    Are you sure you want to cancel invoice
                     <strong>@invoice.InvoiceNumber</strong>?
                 </p>
 
                 <p>
-                    This will permanently delete the invoice
-                    and all its items.
+                    The invoice and its items will be kept for audit history.
+                    If this sale affected inventory, the sold quantities will
+                    be restored and reversal movements recorded.
                 </p>
 
                 <div class="d-flex gap-2">
                     <button class="btn btn-danger"
                             disabled="@isDeleting"
                             @onclick="DeleteInvoice">
-                        @(isDeleting ? "Deleting..." : "Yes, Delete Invoice")
+                        @(isDeleting ? "Cancelling..." : "Yes, Cancel Invoice")
                     </button>
 
                     <button class="btn btn-secondary"
@@ -499,7 +533,8 @@
     // Create a separate editable copy of the invoice.
     private async Task StartEditing()
     {
-        if (invoice == null || isLoading || isSaving || isDeleting)
+        if (invoice == null || invoice.IsCancelled ||
+            isLoading || isSaving || isDeleting)
         {
             return;
         }
@@ -588,6 +623,11 @@
         return decimal.Floor(EditedTotalBeforeRounding);
     }
 
+    private decimal EditedTotalDiscountPercent =>
+        EditedOriginalSubtotal > 0
+            ? decimal.Round((EditedOriginalSubtotal - CalculateTotal()) / EditedOriginalSubtotal * 100 ,
+                2, MidpointRounding.AwayFromZero ):0;
+
     // Calculations using the invoice saved in the database.
     private decimal SavedOriginalSubtotal =>
         invoice?.Items.Sum(item =>
@@ -609,6 +649,12 @@
     // from SQL Server unchanged until the invoice is edited and saved.
     private decimal SavedTotalBeforeRounding =>
         SavedSubtotal - SavedInvoiceDiscountAmount;
+
+    private decimal SavedTotalDiscountPercent =>
+        invoice != null && SavedOriginalSubtotal > 0
+            ? decimal.Round((SavedOriginalSubtotal - invoice.TotalAmount) / SavedOriginalSubtotal * 100,
+                2 , MidpointRounding.AwayFromZero):0;
+
 
     private bool IsValidDiscount(decimal discount)
     {
@@ -673,7 +719,8 @@
     // Save price, quantity, product and discount changes together.
     private async Task SaveChanges()
     {
-        if (invoice == null || !isEditing || isSaving || isDeleting)
+        if (invoice == null || invoice.IsCancelled ||
+            !isEditing || isSaving || isDeleting)
         {
             return;
         }
@@ -767,6 +814,12 @@
 
     private void ShowDeleteConfirmation()
     {
+        if (invoice == null || invoice.IsCancelled ||
+            isLoading || isSaving || isDeleting)
+        {
+            return;
+        }
+
         errorMessage = "";
         successMessage = "";
         showDeleteConfirmation = true;
@@ -779,8 +832,8 @@
 
     private async Task DeleteInvoice()
     {
-        if (invoice == null || isDeleting || isSaving ||
-            !showDeleteConfirmation)
+        if (invoice == null || invoice.IsCancelled ||
+            isDeleting || isSaving || !showDeleteConfirmation)
         {
             return;
         }
@@ -791,11 +844,11 @@
 
         try
         {
-            int idToDelete = invoice.InvoiceId;
-            string numberToDelete = invoice.InvoiceNumber;
+            int idToCancel = invoice.InvoiceId;
+            string numberToCancel = invoice.InvoiceNumber;
 
-            var response = await Api.DeleteAsync(
-                $"api/invoices/{idToDelete}");
+            using var response = await Api.DeleteAsync(
+                $"api/invoices/{idToCancel}");
 
             if (!response.IsSuccessStatusCode)
             {
@@ -804,18 +857,35 @@
                 return;
             }
 
-            invoice = null;
             editItems.Clear();
             isEditing = false;
             showDeleteConfirmation = false;
 
+            // Reload so the cancelled invoice remains visible with its status.
+            try
+            {
+                invoice = await Api.GetFromJsonAsync<InvoiceDto>(
+                    $"api/invoices/{idToCancel}");
+            }
+            catch
+            {
+                // Cancellation succeeded; status will be available on refresh.
+                invoice = null;
+            }
+
             successMessage =
-                $"Invoice {numberToDelete} deleted successfully.";
+                $"Invoice {numberToCancel} cancelled successfully.";
+
+            if (invoice == null)
+            {
+                errorMessage =
+                    "Cancellation succeeded, but invoice details could not be reloaded. Search again to refresh.";
+            }
         }
         catch (Exception ex)
         {
             errorMessage =
-                "Could not delete invoice: " + ex.Message;
+                "Could not cancel invoice: " + ex.Message;
         }
         finally
         {
@@ -834,6 +904,9 @@
         public decimal DiscountPercent { get; set; }
         public decimal RoundingDiscount { get; set; }
         public decimal TotalAmount { get; set; }
+        public decimal TotalDiscountPercent { get; set; }
+        public bool IsCancelled { get; set; }
+        public DateTime? CancelledAt { get; set; }
 
         public List<InvoiceItemDto> Items { get; set; } = new();
     }

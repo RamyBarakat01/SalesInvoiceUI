@@ -1,4 +1,3 @@
-
 @page "/sales-reports"
 @rendermode InteractiveServer
 @using System.Net.Http.Json
@@ -9,10 +8,26 @@
 
 <h1>Sales Transactions Report</h1>
 <p class="text-muted">
-    View sales transactions and filter by date range or customer.
+    View active sales and historical cancelled invoices by date or customer.
 </p>
 
 <div class="card shadow-sm p-4 mb-4">
+    <h5 class="mb-3">Invoice Status</h5>
+    <div class="btn-group mb-4" role="group" aria-label="Invoice status">
+        <button type="button"
+                class="btn @(selectedStatus == "active" ? "btn-primary" : "btn-outline-primary")"
+                disabled="@(isLoading || isDeletingAll)"
+                @onclick='() => ChangeStatusAsync("active")'>
+            Active Invoices
+        </button>
+        <button type="button"
+                class="btn @(selectedStatus == "cancelled" ? "btn-primary" : "btn-outline-primary")"
+                disabled="@(isLoading || isDeletingAll)"
+                @onclick='() => ChangeStatusAsync("cancelled")'>
+            Cancelled Invoices
+        </button>
+    </div>
+
     <h5 class="mb-3">Report Filters</h5>
 
     <div class="row g-3">
@@ -71,49 +86,113 @@
 
 @if (report != null)
 {
-    <div class="row g-4 mb-4">
-        <div class="col-md-6">
-            <div class="card shadow-sm p-4 h-100">
-                <p class="text-muted mb-2">Total Sales Amount</p>
-                <h2 class="text-primary">
-                    EGP @report.TotalSalesAmount.ToString("N2")
-                </h2>
+    @if (selectedStatus == "active")
+    {
+        <div class="row g-3 mb-4">
+            <div class="col-md-6 col-xl-3">
+                <div class="card shadow-sm p-3 h-100">
+                    <p class="text-muted mb-2">Net Sales</p>
+                    <h4 class="text-primary">EGP @report.TotalSalesAmount.ToString("N2")</h4>
+                    <small>@report.TotalInvoices active invoices</small>
+                </div>
+            </div>
+            <div class="col-md-6 col-xl-3">
+                <div class="card shadow-sm p-3 h-100">
+                    <p class="text-muted mb-2">Historical COGS</p>
+                    <h4>@MoneyOrUnavailable(report.TotalCostOfGoodsSold)</h4>
+                    <small class="text-muted">Cost of goods sold</small>
+                </div>
+            </div>
+            <div class="col-md-6 col-xl-3">
+                <div class="card shadow-sm p-3 h-100">
+                    <p class="text-muted mb-2">Gross Profit</p>
+                    <h4 class="text-success">@MoneyOrUnavailable(report.TotalGrossProfit)</h4>
+                    <small class="text-muted">Net sales minus COGS</small>
+                </div>
+            </div>
+            <div class="col-md-6 col-xl-3">
+                <div class="card shadow-sm p-3 h-100">
+                    <p class="text-muted mb-2">Gross Profit Margin</p>
+                    <h4>@PercentOrUnavailable(report.TotalGrossProfitMargin)</h4>
+                    <small class="text-muted">Gross profit / net sales</small>
+                </div>
             </div>
         </div>
 
-        <div class="col-md-6">
-            <div class="card shadow-sm p-4 h-100">
-                <p class="text-muted mb-2">Total Invoices</p>
-                <h2>@report.TotalInvoices</h2>
+        @if (!report.HasCompleteCostData)
+        {
+            <div class="alert alert-warning" role="status">
+                Historical costs are unavailable for @report.InvoicesWithMissingCosts of
+                @report.TotalInvoices invoice(s). Report-wide COGS, gross profit, and margin
+                cannot be calculated reliably. Individual invoices with known costs
+                still show their profit below.
+            </div>
+        }
+        else
+        {
+            <p class="text-muted small">
+                Historical cost coverage: @report.InvoicesWithKnownCosts of @report.TotalInvoices invoices.
+            </p>
+        }
+    }
+    else
+    {
+        <div class="row g-3 mb-4">
+            <div class="col-md-6">
+                <div class="card shadow-sm p-3 h-100">
+                    <p class="text-muted mb-2">Cancelled Invoices</p>
+                    <h4>@report.TotalInvoices</h4>
+                </div>
+            </div>
+            <div class="col-md-6">
+                <div class="card shadow-sm p-3 h-100">
+                    <p class="text-muted mb-2">Original Cancelled Amount</p>
+                    <h4>EGP @report.TotalCancelledAmount.ToString("N2")</h4>
+                    <small class="text-muted">Historical amount only — not active revenue</small>
+                </div>
             </div>
         </div>
-    </div>
+        <div class="alert alert-info">
+            Cancelled invoices are kept for audit purposes. Their original amounts
+            do not count toward net sales or gross profit. Dates filter by invoice
+            creation date, not cancellation date.
+        </div>
+    }
 
     <div class="card shadow-sm p-4">
         <div class="d-flex justify-content-between align-items-center mb-3">
-            <h5 class="mb-0">Sales Transactions</h5>
-
-            <span class="badge bg-primary">
-                @report.Transactions.Count records
-            </span>
+            <h5 class="mb-0">@(selectedStatus == "active" ? "Sales Transactions" : "Cancelled Invoice History")</h5>
+            <span class="badge bg-primary">@report.Transactions.Count records</span>
         </div>
 
         @if (report.Transactions.Count == 0)
         {
             <div class="alert alert-info mb-0">
-                No transactions found for the selected filters.
+                No invoices found for the selected filters.
             </div>
         }
         else
         {
             <div class="table-responsive">
-                <table class="table table-striped table-hover">
+                <table class="table table-striped table-hover align-middle">
                     <thead>
                         <tr>
                             <th>Invoice Number</th>
-                            <th>Date</th>
+                            <th>Invoice Date</th>
                             <th>Customer</th>
-                            <th>Amount</th>
+                            @if (selectedStatus == "active")
+                            {
+                                <th>Net Sales</th>
+                                <th>COGS</th>
+                                <th>Gross Profit</th>
+                                <th>Margin</th>
+                            }
+                            else
+                            {
+                                <th>Cancellation Date</th>
+                                <th>Original Amount</th>
+                                <th>Status</th>
+                            }
                             <th>Details</th>
                         </tr>
                     </thead>
@@ -122,16 +201,24 @@
                         {
                             <tr>
                                 <td>@transaction.InvoiceNumber</td>
-                                <td>
-                                    @transaction.InvoiceDate.ToString("dd MMM yyyy")
-                                </td>
+                                <td>@transaction.InvoiceDate.ToString("dd MMM yyyy")</td>
                                 <td>@transaction.CustomerName</td>
-                                <td>
-                                    EGP @transaction.TotalAmount.ToString("N2")
-                                </td>
+                                @if (selectedStatus == "active")
+                                {
+                                    <td>EGP @transaction.TotalAmount.ToString("N2")</td>
+                                    <td>@MoneyOrUnavailable(transaction.CostOfGoodsSold)</td>
+                                    <td>@MoneyOrUnavailable(transaction.GrossProfit)</td>
+                                    <td>@PercentOrUnavailable(transaction.GrossProfitMargin)</td>
+                                }
+                                else
+                                {
+                                    <td>@(transaction.CancelledAt?.ToString("dd MMM yyyy HH:mm") ?? "—")</td>
+                                    <td>EGP @transaction.TotalAmount.ToString("N2")</td>
+                                    <td><span class="badge bg-secondary">Cancelled</span></td>
+                                }
                                 <td>
                                     <a class="btn btn-sm btn-outline-primary"
-                                       href="@($"/invoice-details?id={GetInvoiceId(transaction.InvoiceNumber)}")">
+                                       href="@($"/invoice-details?id={transaction.InvoiceId}")">
                                         View
                                     </a>
                                 </td>
@@ -143,44 +230,46 @@
         }
     </div>
 
-    <!-- Delete All Invoices section -->
+    <!-- Bulk cancellation: retains invoice history and reverses posted stock. -->
     <div class="card shadow-sm p-4 mt-4">
-        <h5>Delete All Invoices</h5>
+        <h5>Cancel All Active Invoices</h5>
 
         <p class="text-muted">
-            Permanently delete every invoice and its items.
-            Customers and products will not be deleted.
+            Cancels ALL active sales invoices across the database, not only filtered results.
+            Posted invoices have their stock restored. Invoice records remain for audit.
+            This bulk operation has not yet been tested on a restored database.
         </p>
 
         <button class="btn btn-outline-danger"
-                disabled="@(isLoading || isDeletingAll || report.TotalInvoices == 0)"
+                disabled="@(isLoading || isDeletingAll || selectedStatus != "active" || report.TotalInvoices == 0)"
                 @onclick="ShowDeleteAllConfirmation">
-            Delete All Invoices
+            Cancel All Active Invoices
         </button>
 
         @if (showDeleteAllConfirmation)
         {
             <div class="alert alert-warning mt-3">
                 <p>
-                    <strong>Warning:</strong> This action permanently deletes
-                    ALL invoices, not just the currently filtered results.
+                    <strong>Warning:</strong> This action cancels ALL active sales invoices,
+                    not just the filtered results. It restores stock for posted invoices
+                    and cannot be undone through this page. Test on a database copy first.
                 </p>
 
                 <p>
-                    Type <strong>DELETE ALL</strong> to confirm.
+                    Type <strong>CANCEL ALL</strong> to confirm.
                 </p>
 
                 <input class="form-control mb-3"
-                       placeholder="Type DELETE ALL"
+                       placeholder="Type CANCEL ALL"
                        @bind="deleteConfirmationText"
                        @bind:event="oninput"
                        disabled="@isDeletingAll" />
 
                 <div class="d-flex gap-2">
                     <button class="btn btn-danger"
-                            disabled="@(isDeletingAll || deleteConfirmationText != "DELETE ALL")"
+                            disabled="@(isDeletingAll || deleteConfirmationText != "CANCEL ALL")"
                             @onclick="DeleteAllInvoices">
-                        @(isDeletingAll ? "Deleting..." : "Confirm Delete All")
+                        @(isDeletingAll ? "Cancelling..." : "Confirm Cancel All")
                     </button>
 
                     <button class="btn btn-secondary"
@@ -198,6 +287,7 @@
     private DateTime? fromDate;
     private DateTime? toDate;
     private int selectedCustomerId;
+    private string selectedStatus = "active";
 
     private bool isLoading;
     private bool isDeletingAll;
@@ -232,8 +322,20 @@
         }
     }
 
+    private async Task ChangeStatusAsync(string status)
+    {
+        if (isLoading || isDeletingAll || selectedStatus == status)
+            return;
+
+        selectedStatus = status;
+        await LoadReport();
+    }
+
     private async Task LoadReport()
     {
+        if (isLoading || isDeletingAll)
+            return;
+
         isLoading = true;
         errorMessage = "";
         successMessage = "";
@@ -242,7 +344,7 @@
 
         try
         {
-            var parameters = new List<string>();
+            var parameters = new List<string> { $"status={selectedStatus}" };
 
             if (fromDate.HasValue)
             {
@@ -273,7 +375,7 @@
                 url += "?" + string.Join("&", parameters);
             }
 
-            var response = await Api.GetAsync(url);
+            using var response = await Api.GetAsync(url);
 
             if (!response.IsSuccessStatusCode)
             {
@@ -284,6 +386,8 @@
 
             report = await response.Content
                 .ReadFromJsonAsync<SalesReportDto>();
+            if (report == null)
+                errorMessage = "Sales report response was empty.";
         }
         catch (Exception ex)
         {
@@ -324,7 +428,7 @@
         if (isDeletingAll ||
             isLoading ||
             !showDeleteAllConfirmation ||
-            deleteConfirmationText != "DELETE ALL")
+            deleteConfirmationText != "CANCEL ALL")
         {
             return;
         }
@@ -344,15 +448,16 @@
                 return;
             }
 
-            // Reset filters after deletion
+            // Reset filters after cancellation
             fromDate = null;
             toDate = null;
             selectedCustomerId = 0;
+            selectedStatus = "active";
 
             report = await Api.GetFromJsonAsync<SalesReportDto>(
                 "api/reports/sales");
 
-            successMessage = "All invoices deleted successfully.";
+            successMessage = "All active invoices cancelled successfully. Posted inventory was restored.";
 
             showDeleteAllConfirmation = false;
             deleteConfirmationText = "";
@@ -360,7 +465,7 @@
         catch (Exception ex)
         {
             errorMessage =
-                "Could not complete deletion or refresh the report: " +
+                "Could not confirm bulk cancellation or refresh the report: " +
                 ex.Message;
         }
         finally
@@ -369,16 +474,11 @@
         }
     }
 
-    private static int GetInvoiceId(string invoiceNumber)
-    {
-        if (invoiceNumber.StartsWith("INV-") &&
-            int.TryParse(invoiceNumber.Substring(4), out int id))
-        {
-            return id;
-        }
+    private static string MoneyOrUnavailable(decimal? value) =>
+        value.HasValue ? $"EGP {value.Value:N2}" : "Unavailable";
 
-        return 0;
-    }
+    private static string PercentOrUnavailable(decimal? value) =>
+        value.HasValue ? $"{value.Value:N2}%" : "Unavailable";
 
     public class CustomerDto
     {
@@ -389,16 +489,31 @@
     public class SalesReportDto
     {
         public List<SalesTransactionDto> Transactions { get; set; } = new();
+        public string Status { get; set; } = "active";
         public decimal TotalSalesAmount { get; set; }
+        public decimal TotalCancelledAmount { get; set; }
         public int TotalInvoices { get; set; }
+        public decimal? TotalCostOfGoodsSold { get; set; }
+        public decimal? TotalGrossProfit { get; set; }
+        public decimal? TotalGrossProfitMargin { get; set; }
+        public bool HasCompleteCostData { get; set; }
+        public int InvoicesWithKnownCosts { get; set; }
+        public int InvoicesWithMissingCosts { get; set; }
     }
 
     public class SalesTransactionDto
     {
+        public int InvoiceId { get; set; }
         public string InvoiceNumber { get; set; } = "";
         public DateTime InvoiceDate { get; set; }
-        public int CustomerId { get; set; }
+        public int? CustomerId { get; set; }
+        public bool IsCancelled { get; set; }
+        public DateTime? CancelledAt { get; set; }
         public string CustomerName { get; set; } = "";
         public decimal TotalAmount { get; set; }
+        public decimal? CostOfGoodsSold { get; set; }
+        public decimal? GrossProfit { get; set; }
+        public decimal? GrossProfitMargin { get; set; }
+        public bool HasCompleteCostData { get; set; }
     }
 }

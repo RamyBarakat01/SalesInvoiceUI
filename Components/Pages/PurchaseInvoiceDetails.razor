@@ -1,0 +1,473 @@
+
+@page "/purchase-invoice-details"
+@rendermode InteractiveServer
+@using System.Net.Http.Json
+@inject IHttpClientFactory HttpClientFactory
+
+<PageTitle>Purchase Invoice Details</PageTitle>
+
+<h1>Purchase Invoice Details</h1>
+
+<p class="text-muted">
+    Search for a purchase invoice using its ID.
+</p>
+
+<!-- PURCHASE INVOICE SEARCH -->
+<div class="card shadow-sm p-4 mb-4">
+
+    <label class="form-label" for="purchaseInvoiceId">
+        Purchase Invoice ID
+    </label>
+
+    <div class="d-flex gap-2">
+
+        <input id="purchaseInvoiceId"
+               type="number"
+               min="1"
+               class="form-control"
+               placeholder="Enter purchase invoice ID"
+               @bind="purchaseInvoiceId"
+               @bind:event="oninput"
+               disabled="@isLoading" />
+
+        <button class="btn btn-primary"
+                disabled="@isLoading"
+                @onclick="SearchPurchaseInvoice">
+
+            @(isLoading ? "Searching..." : "Search")
+
+        </button>
+
+    </div>
+</div>
+
+@if (!string.IsNullOrWhiteSpace(errorMessage))
+{
+    <div class="alert alert-danger">
+        @errorMessage
+    </div>
+}
+
+@if (purchaseInvoice != null)
+{
+    <div class="card shadow-sm p-4">
+
+        <!-- PURCHASE HEADER -->
+        <div class="d-flex justify-content-between flex-wrap gap-3 mb-3">
+
+            <div>
+
+                <h3>@purchaseInvoice.PurchaseInvoiceNumber</h3>
+
+                <p class="text-muted mb-0">
+                    Vendor: @purchaseInvoice.VendorName
+                </p>
+
+                <p class="text-muted mb-2">
+                    Date:
+                    @purchaseInvoice.PurchaseDate.ToString("dd MMM yyyy")
+                </p>
+
+                @if (purchaseInvoice.IsPosted)
+                {
+                    <span class="badge bg-success">
+                        Posted to Inventory
+                    </span>
+                }
+                else
+                {
+                    <span class="badge bg-secondary">
+                        Draft / Not Posted
+                    </span>
+                }
+
+            </div>
+
+            <div class="text-end">
+
+                <small class="text-muted">
+                    Purchase Invoice Total
+                </small>
+
+                <h3 class="text-primary">
+                    EGP @purchaseInvoice.TotalAmount.ToString("N2")
+                </h3>
+
+            </div>
+
+        </div>
+
+        <!-- PURCHASED PRODUCTS -->
+        <h5 class="mb-3">Purchased Products</h5>
+
+        <div class="table-responsive">
+
+            <table class="table table-striped align-middle">
+
+                <thead>
+                    <tr>
+                        <th>Product</th>
+                        <th>Quantity</th>
+                        <th>Unit Cost (EGP)</th>
+                        <th>Original Total</th>
+                        <th>Item Discount %</th>
+                        <th>Item Discount</th>
+                        <th>Invoice Discount Share</th>
+                        <th>Rounding Share</th>
+                        <th>Net Line Total</th>
+                    </tr>
+                </thead>
+
+                <tbody>
+
+                    @foreach (var item in purchaseInvoice.Items)
+                    {
+                        <tr>
+
+                            <td>
+                                @item.ProductName
+                            </td>
+
+                            <td>
+                                @item.Quantity
+                            </td>
+
+                            <td>
+                                @item.UnitCost.ToString("N4")
+                            </td>
+
+                            <td>
+                                @GetOriginalLineTotal(item).ToString("N2")
+                            </td>
+
+                            <td>
+                                @item.DiscountPercent.ToString("N2")%
+                            </td>
+
+                            <td class="text-success">
+                                - @GetItemDiscount(item).ToString("N2")
+                            </td>
+
+                            <td class="text-success">
+                                - @item.InvoiceDiscountAllocation.ToString("N2")
+                            </td>
+
+                            <td class="text-success">
+                                - @item.RoundingDiscountAllocation.ToString("N2")
+                            </td>
+
+                            <td>
+                                <strong>
+                                    @item.LineTotal.ToString("N2")
+                                </strong>
+                            </td>
+
+                        </tr>
+                    }
+
+                </tbody>
+
+            </table>
+
+        </div>
+
+        <!-- PURCHASE SUMMARY -->
+        <div class="border rounded p-3 mt-4">
+
+            <h5>Purchase Summary</h5>
+
+            <hr />
+
+            <div class="d-flex justify-content-between mb-2">
+
+                <span>Number of Product Lines</span>
+
+                <span>
+                    @purchaseInvoice.Items.Count
+                </span>
+
+            </div>
+
+            <div class="d-flex justify-content-between mb-3">
+
+                <span>Total Units Purchased</span>
+
+                <span>
+                    @purchaseInvoice.Items.Sum(i => i.Quantity)
+                </span>
+
+            </div>
+
+            <hr />
+
+            <div class="d-flex justify-content-between mb-2">
+
+                <span>Subtotal Before Discounts</span>
+
+                <span>
+                    EGP @purchaseInvoice.OriginalSubtotal.ToString("N2")
+                </span>
+
+            </div>
+
+            <div class="d-flex justify-content-between mb-2">
+
+                <span>Total Item Discounts</span>
+
+                <span class="text-success">
+                    - EGP @purchaseInvoice.TotalItemDiscounts.ToString("N2")
+                </span>
+
+            </div>
+
+            <div class="d-flex justify-content-between mb-3">
+
+                <span>Subtotal After Item Discounts</span>
+
+                <strong>
+                    EGP @purchaseInvoice.SubtotalAfterItemDiscounts.ToString("N2")
+                </strong>
+
+            </div>
+
+            <hr />
+
+            <div class="d-flex justify-content-between mb-2">
+
+                <span>
+                    Invoice Discount
+                    (@purchaseInvoice.DiscountPercent.ToString("N2")%)
+                </span>
+
+                <span class="text-success">
+                    - EGP @purchaseInvoice.InvoiceDiscountAmount.ToString("N2")
+                </span>
+
+            </div>
+
+            <div class="d-flex justify-content-between mb-2">
+
+                <span>Total Before Rounding</span>
+
+                <span>
+                    EGP @TotalBeforeRounding.ToString("N2")
+                </span>
+
+            </div>
+
+            <div class="d-flex justify-content-between mb-2">
+
+                <span>Automatic Rounding Discount</span>
+
+                <span class="text-success">
+                    - EGP @purchaseInvoice.RoundingDiscount.ToString("N2")
+                </span>
+
+            </div>
+
+            <div class="d-flex justify-content-between mb-2">
+
+                <strong>Total Discount (%)</strong>
+
+                <strong class="text-success">
+                    @purchaseInvoice.TotalDiscountPercent.ToString("N2")%
+                </strong>
+
+            </div>
+
+            <hr />
+
+            <div class="d-flex justify-content-between">
+
+                <h5>Final Purchase Total</h5>
+
+                <h4 class="text-primary">
+                    EGP @purchaseInvoice.TotalAmount.ToString("N2")
+                </h4>
+
+            </div>
+
+        </div>
+
+        <p class="text-muted mt-3 mb-0">
+            This page is read-only. Posted purchases have already
+            updated inventory using their discounted acquisition costs.
+            Editing or cancelling posted purchases requires controlled
+            inventory reversal rules.
+        </p>
+
+    </div>
+}
+
+@code {
+
+    private int purchaseInvoiceId = 1;
+
+    private bool isLoading;
+
+    private string errorMessage = "";
+
+    private PurchaseInvoiceDto? purchaseInvoice;
+
+    [SupplyParameterFromQuery(Name = "id")]
+    public int? PurchaseInvoiceIdFromUrl { get; set; }
+
+    private HttpClient Api =>
+        HttpClientFactory.CreateClient("SalesInvoiceAPI");
+
+    protected override async Task OnParametersSetAsync()
+    {
+        if (PurchaseInvoiceIdFromUrl is > 0)
+        {
+            purchaseInvoiceId = PurchaseInvoiceIdFromUrl.Value;
+
+            await SearchPurchaseInvoice();
+        }
+    }
+
+    private async Task SearchPurchaseInvoice()
+    {
+        if (isLoading)
+        {
+            return;
+        }
+
+        errorMessage = "";
+        purchaseInvoice = null;
+
+        if (purchaseInvoiceId <= 0)
+        {
+            errorMessage =
+                "Please enter a valid purchase invoice ID.";
+
+            return;
+        }
+
+        isLoading = true;
+
+        try
+        {
+            using var response = await Api.GetAsync(
+                $"api/purchase-invoices/{purchaseInvoiceId}");
+
+            if (response.StatusCode ==
+                System.Net.HttpStatusCode.NotFound)
+            {
+                errorMessage =
+                    "Purchase invoice not found.";
+
+                return;
+            }
+
+            if (!response.IsSuccessStatusCode)
+            {
+                errorMessage =
+                    "Could not retrieve purchase invoice: " +
+                    await response.Content.ReadAsStringAsync();
+
+                return;
+            }
+
+            purchaseInvoice = await response.Content
+                .ReadFromJsonAsync<PurchaseInvoiceDto>();
+
+            if (purchaseInvoice == null)
+            {
+                errorMessage =
+                    "Purchase invoice response was empty.";
+            }
+        }
+        catch (Exception ex)
+        {
+            errorMessage =
+                "Could not retrieve purchase invoice: " +
+                ex.Message;
+        }
+        finally
+        {
+            isLoading = false;
+        }
+    }
+
+    // Original amount before discounts.
+    private static decimal GetOriginalLineTotal(
+        PurchaseInvoiceItemDto item)
+    {
+        return decimal.Round(
+            item.UnitCost * item.Quantity,
+            2,
+            MidpointRounding.AwayFromZero);
+    }
+
+    // Item-level discount amount.
+    private static decimal GetItemDiscount(
+        PurchaseInvoiceItemDto item)
+    {
+        return decimal.Round(
+            GetOriginalLineTotal(item) *
+            item.DiscountPercent / 100,
+            2,
+            MidpointRounding.AwayFromZero);
+    }
+
+    // Purchase amount before automatic rounding.
+    private decimal TotalBeforeRounding =>
+        purchaseInvoice == null
+            ? 0
+            : purchaseInvoice.SubtotalAfterItemDiscounts
+              - purchaseInvoice.InvoiceDiscountAmount;
+
+    public class PurchaseInvoiceDto
+    {
+        public int PurchaseInvoiceId { get; set; }
+
+        public string PurchaseInvoiceNumber { get; set; } = "";
+
+        public DateTime PurchaseDate { get; set; }
+
+        public int VendorId { get; set; }
+
+        public string VendorName { get; set; } = "";
+
+        public decimal DiscountPercent { get; set; }
+
+        public decimal RoundingDiscount { get; set; }
+
+        public decimal TotalAmount { get; set; }
+
+        public bool IsPosted { get; set; }
+
+        public decimal OriginalSubtotal { get; set; }
+
+        public decimal TotalItemDiscounts { get; set; }
+
+        public decimal SubtotalAfterItemDiscounts { get; set; }
+
+        public decimal InvoiceDiscountAmount { get; set; }
+
+        public decimal TotalDiscountPercent { get; set; }
+
+        public List<PurchaseInvoiceItemDto> Items { get; set; } = new();
+    }
+
+    public class PurchaseInvoiceItemDto
+    {
+        public int PurchaseInvoiceItemId { get; set; }
+
+        public int ProductId { get; set; }
+
+        public string ProductName { get; set; } = "";
+
+        public int Quantity { get; set; }
+
+        public decimal UnitCost { get; set; }
+
+        public decimal DiscountPercent { get; set; }
+
+        public decimal InvoiceDiscountAllocation { get; set; }
+
+        public decimal RoundingDiscountAllocation { get; set; }
+
+        public decimal LineTotal { get; set; }
+    }
+}

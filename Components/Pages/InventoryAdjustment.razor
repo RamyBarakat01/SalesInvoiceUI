@@ -1,0 +1,322 @@
+
+@page "/inventory/adjustments"
+@rendermode InteractiveServer
+@using System.Net.Http.Json
+@using System.Net
+@inject IHttpClientFactory HttpClientFactory
+
+<PageTitle>Inventory Adjustments</PageTitle>
+
+<h1>Inventory Adjustments</h1>
+
+<p class="text-muted">
+    Record opening stock and inventory corrections.
+    Each successful adjustment is saved in stock movement history.
+</p>
+
+@if (!string.IsNullOrWhiteSpace(successMessage))
+{
+    <div class="alert alert-success">@successMessage</div>
+}
+
+@if (!string.IsNullOrWhiteSpace(errorMessage))
+{
+    <div class="alert alert-danger">@errorMessage</div>
+}
+
+<div class="row g-4">
+    <div class="col-lg-7">
+        <div class="card shadow-sm p-4">
+            <h4 class="mb-3">New Stock Adjustment</h4>
+
+            @if (isLoading)
+            {
+                <p>Loading products...</p>
+            }
+            else
+            {
+                <div class="mb-3">
+                    <label class="form-label">Product</label>
+                    <select class="form-select"
+                            @bind="selectedProductId">
+                        <option value="0">Select a product</option>
+
+                        @foreach (var product in products)
+                        {
+                            <option value="@product.ProductId">
+                                @product.Name
+                            </option>
+                        }
+                    </select>
+                </div>
+
+                <div class="mb-3">
+                    <label class="form-label">Adjustment Type</label>
+                    <select class="form-select"
+                            @bind="adjustmentType">
+                        <option value="Adjustment">Stock Adjustment</option>
+                        <option value="OpeningStock">Opening Stock</option>
+                    </select>
+                </div>
+
+                <div class="mb-3">
+                    <label class="form-label">
+                        Quantity Change
+                    </label>
+
+                    <InputNumber class="form-control"
+                                 @bind-Value="quantityChange" />
+
+                    <small class="text-muted">
+                        Positive adds stock. Negative removes stock.
+                    </small>
+                </div>
+
+                @if (adjustmentType == "OpeningStock")
+                {
+                    <div class="mb-3">
+                        <label class="form-label">
+                            Opening Unit Cost (EGP)
+                        </label>
+
+                        <InputNumber class="form-control"
+                                     @bind-Value="openingUnitCost"
+                                     step="0.0001" />
+                    </div>
+                }
+
+                <div class="mb-3">
+                    <label class="form-label">Reason</label>
+
+                    <textarea class="form-control"
+                              rows="3"
+                              maxlength="500"
+                              @bind="reason">
+                    </textarea>
+                </div>
+
+                <button class="btn btn-primary"
+                        disabled="@isSubmitting"
+                        @onclick="SubmitAdjustment">
+                    @(isSubmitting ? "Saving..." : "Save Adjustment")
+                </button>
+            }
+        </div>
+    </div>
+
+    <div class="col-lg-5">
+        <div class="card shadow-sm p-4">
+            <h4>Stock Preview</h4>
+
+            @if (SelectedProduct is not null)
+            {
+                <p>
+                    <strong>Product:</strong>
+                    @SelectedProduct.Name
+                </p>
+
+                <p>
+                    <strong>Current Stock:</strong>
+                    @SelectedProduct.StockQuantity
+                </p>
+
+                <p>
+                    <strong>Average Unit Cost:</strong>
+                    EGP @SelectedProduct.AverageCost.ToString("N4")
+                </p>
+
+                <hr />
+
+                <p>
+                    <strong>Quantity Change:</strong>
+                    @quantityChange
+                </p>
+
+                <p>
+                    <strong>Projected Stock:</strong>
+                    @ProjectedStock
+                </p>
+
+                @if (ProjectedStock < 0)
+                {
+                    <div class="alert alert-danger">
+                        This adjustment would result in negative stock.
+                    </div>
+                }
+
+                @if (adjustmentType == "OpeningStock" &&
+                     SelectedProduct.StockQuantity != 0)
+                {
+                    <div class="alert alert-warning">
+                        Opening stock requires zero current stock
+                        and no previous movement history.
+                    </div>
+                }
+            }
+            else
+            {
+                <p class="text-muted">
+                    Select a product to preview the adjustment.
+                </p>
+            }
+        </div>
+    </div>
+</div>
+
+@code {
+    private bool isLoading = true;
+    private bool isSubmitting;
+
+    private string errorMessage = "";
+    private string successMessage = "";
+
+    private List<InventoryProductDto> products = new();
+
+    private int selectedProductId;
+    private string adjustmentType = "Adjustment";
+    private int quantityChange;
+    private decimal? openingUnitCost;
+    private string reason = "";
+
+    private InventoryProductDto? SelectedProduct =>
+        products.FirstOrDefault(p =>
+            p.ProductId == selectedProductId);
+
+    private long ProjectedStock =>
+        (long)(SelectedProduct?.StockQuantity ?? 0) +
+        quantityChange;
+
+    private HttpClient Api =>
+        HttpClientFactory.CreateClient("SalesInvoiceAPI");
+
+    protected override async Task OnInitializedAsync()
+    {
+        await LoadProducts();
+    }
+
+    private async Task LoadProducts()
+    {
+        isLoading = true;
+
+        try
+        {
+            var inventory =
+                await Api.GetFromJsonAsync<InventoryResponse>(
+                    "api/inventory");
+
+            products = inventory?.Products ?? new();
+        }
+        catch (Exception ex)
+        {
+            errorMessage =
+                "Could not load inventory: " + ex.Message;
+        }
+        finally
+        {
+            isLoading = false;
+        }
+    }
+
+    private async Task SubmitAdjustment()
+    {
+        errorMessage = "";
+        successMessage = "";
+
+        if (SelectedProduct is null)
+        {
+            errorMessage = "Select a product.";
+            return;
+        }
+
+        if (quantityChange == 0)
+        {
+            errorMessage = "Quantity change cannot be zero.";
+            return;
+        }
+
+        if (ProjectedStock < 0 ||
+            ProjectedStock > int.MaxValue)
+        {
+            errorMessage = "The resulting stock quantity is invalid.";
+            return;
+        }
+
+        if (string.IsNullOrWhiteSpace(reason))
+        {
+            errorMessage = "A reason is required.";
+            return;
+        }
+
+        if (adjustmentType == "OpeningStock")
+        {
+            if (quantityChange <= 0 ||
+                openingUnitCost is null ||
+                openingUnitCost < 0 ||
+                decimal.Round(openingUnitCost.Value, 4) != openingUnitCost.Value)
+            {
+                errorMessage =
+                    "Opening stock requires a positive quantity and a valid unit cost.";
+                return;
+            }
+        }
+
+        isSubmitting = true;
+
+        try
+        {
+            var request = new
+            {
+                ProductId = selectedProductId,
+                AdjustmentType = adjustmentType,
+                QuantityChange = quantityChange,
+                UnitCost = adjustmentType == "OpeningStock"
+                    ? openingUnitCost
+                    : null,
+                Reason = reason.Trim()
+            };
+
+            using var response =
+                await Api.PostAsJsonAsync(
+                    "api/inventory/adjustments",
+                    request);
+
+            if (!response.IsSuccessStatusCode)
+            {
+                var details = await response.Content.ReadAsStringAsync();
+
+                errorMessage =
+                    $"Adjustment failed ({(int)response.StatusCode}): {details}";
+                return;
+            }
+
+            successMessage = "Inventory adjustment saved successfully.";
+
+            quantityChange = 0;
+            openingUnitCost = null;
+            reason = "";
+
+            await LoadProducts();
+        }
+        catch (Exception ex)
+        {
+            errorMessage = "Could not save adjustment: " + ex.Message;
+        }
+        finally
+        {
+            isSubmitting = false;
+        }
+    }
+
+    public class InventoryResponse
+    {
+        public List<InventoryProductDto> Products { get; set; } = new();
+    }
+
+    public class InventoryProductDto
+    {
+        public int ProductId { get; set; }
+        public string Name { get; set; } = "";
+        public int StockQuantity { get; set; }
+        public decimal AverageCost { get; set; }
+    }
+}

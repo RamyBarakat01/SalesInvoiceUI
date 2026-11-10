@@ -1,0 +1,370 @@
+
+@page "/purchase-reports"
+@rendermode InteractiveServer
+@using System.Net.Http.Json
+@using System.Globalization
+@inject IHttpClientFactory HttpClientFactory
+
+<PageTitle>Purchase Reports</PageTitle>
+
+<h1>Purchase Reports</h1>
+<p class="text-muted">
+    Review vendor purchases, discounts, and purchased quantities.
+</p>
+
+@if (!string.IsNullOrWhiteSpace(errorMessage))
+{
+    <div class="alert alert-danger">@errorMessage</div>
+}
+
+<!-- REPORT FILTERS -->
+<div class="card shadow-sm p-4 mb-4">
+    <h4>Report Filters</h4>
+
+    <div class="row g-3 mt-1">
+        <div class="col-md-3">
+            <label class="form-label">From Date</label>
+            <input type="date"
+                   class="form-control"
+                   @bind="fromDate"
+                   disabled="@isLoading" />
+        </div>
+
+        <div class="col-md-3">
+            <label class="form-label">To Date</label>
+            <input type="date"
+                   class="form-control"
+                   @bind="toDate"
+                   disabled="@isLoading" />
+        </div>
+
+        <div class="col-md-4">
+            <label class="form-label">Vendor</label>
+            <select class="form-select"
+                    @bind="selectedVendorId"
+                    disabled="@isLoading">
+                <option value="0">All Vendors</option>
+                @foreach (var vendor in vendors)
+                {
+                    <option value="@vendor.VendorId">
+                        @vendor.Name
+                    </option>
+                }
+            </select>
+        </div>
+
+        <div class="col-md-2 d-flex align-items-end">
+            <button class="btn btn-primary w-100"
+                    disabled="@isLoading"
+                    @onclick="LoadReportAsync">
+                @(isLoading ? "Loading..." : "Generate")
+            </button>
+        </div>
+    </div>
+
+    <button class="btn btn-outline-secondary mt-3"
+            disabled="@isLoading"
+            @onclick="ClearFiltersAsync">
+        Clear Filters
+    </button>
+</div>
+
+@if (isLoading)
+{
+    <p>Loading purchase report...</p>
+}
+else if (report != null)
+{
+    <!-- SUMMARY CARDS -->
+    <div class="row g-3 mb-4">
+        <div class="col-md-3">
+            <div class="card shadow-sm h-100 p-3">
+                <p class="text-muted mb-2">Net Purchases</p>
+                <h4 class="text-primary">
+                    EGP @report.TotalPurchaseAmount.ToString("N2")
+                </h4>
+            </div>
+        </div>
+
+        <div class="col-md-3">
+            <div class="card shadow-sm h-100 p-3">
+                <p class="text-muted mb-2">Purchase Invoices</p>
+                <h4>@report.TotalPurchaseInvoices</h4>
+            </div>
+        </div>
+
+        <div class="col-md-3">
+            <div class="card shadow-sm h-100 p-3">
+                <p class="text-muted mb-2">Total Discounts</p>
+                <h4 class="text-success">
+                    EGP @report.TotalDiscounts.ToString("N2")
+                </h4>
+            </div>
+        </div>
+
+        <div class="col-md-3">
+            <div class="card shadow-sm h-100 p-3">
+                <p class="text-muted mb-2">Units Purchased</p>
+                <h4>@report.TotalUnitsPurchased</h4>
+            </div>
+        </div>
+    </div>
+
+    <!-- PURCHASE TRANSACTIONS -->
+    <div class="card shadow-sm p-4">
+        <h4>Purchase Transactions</h4>
+
+        <p class="text-muted">
+            Showing @report.Transactions.Count purchase invoice(s).
+        </p>
+
+        @if (report.Transactions.Count == 0)
+        {
+            <div class="alert alert-info mb-0">
+                No purchase invoices found for the selected filters.
+            </div>
+        }
+        else
+        {
+            <div class="table-responsive">
+                <table class="table table-striped table-hover align-middle">
+                    <thead>
+                        <tr>
+                            <th>Invoice</th>
+                            <th>Date</th>
+                            <th>Vendor</th>
+                            <th>Units</th>
+                            <th>Original Total</th>
+                            <th>Discount (EGP)</th>
+                            <th>Total Discount %</th>
+                            <th>Net Total</th>
+                            <th>Details</th>
+                        </tr>
+                    </thead>
+
+                    <tbody>
+                        @foreach (var transaction in report.Transactions)
+                        {
+                            <tr>
+                                <td>
+                                    @transaction.PurchaseInvoiceNumber
+                                </td>
+
+                                <td>
+                                    @transaction.PurchaseDate.ToString("dd MMM yyyy")
+                                </td>
+
+                                <td>@transaction.VendorName</td>
+
+                                <td>@transaction.TotalUnits</td>
+
+                                <td>
+                                    EGP @transaction.OriginalSubtotal.ToString("N2")
+                                </td>
+
+                                <td class="text-success">
+                                    EGP @transaction.TotalDiscountAmount.ToString("N2")
+                                </td>
+
+                                <td>
+                                    @transaction.TotalDiscountPercent.ToString("N2")%
+                                </td>
+
+                                <td>
+                                    <strong>
+                                        EGP @transaction.TotalAmount.ToString("N2")
+                                    </strong>
+                                </td>
+
+                                <td>
+                                    <a class="btn btn-sm btn-outline-primary"
+                                       href="@($"/purchase-invoice-details?id={transaction.PurchaseInvoiceId}")">
+                                        View
+                                    </a>
+                                </td>
+                            </tr>
+                        }
+                    </tbody>
+                </table>
+            </div>
+        }
+    </div>
+}
+
+@code {
+    private List<VendorDto> vendors = new();
+
+    private PurchaseReportDto? report;
+
+    private DateTime? fromDate;
+    private DateTime? toDate;
+
+    private int selectedVendorId;
+
+    private bool isLoading;
+    private string errorMessage = "";
+
+    private HttpClient Api =>
+        HttpClientFactory.CreateClient("SalesInvoiceAPI");
+
+    protected override async Task OnInitializedAsync()
+    {
+        try
+        {
+            vendors = await Api
+                .GetFromJsonAsync<List<VendorDto>>("api/vendors")
+                ?? new();
+        }
+        catch (Exception ex)
+        {
+            errorMessage =
+                "Could not load vendors: " + ex.Message;
+        }
+
+        await LoadReportAsync();
+    }
+
+    private async Task ClearFiltersAsync()
+    {
+        fromDate = null;
+        toDate = null;
+        selectedVendorId = 0;
+
+        await LoadReportAsync();
+    }
+
+    private async Task LoadReportAsync()
+    {
+        if (isLoading)
+        {
+            return;
+        }
+
+        errorMessage = "";
+
+        // Validate date range before sending request.
+        if (fromDate.HasValue &&
+            toDate.HasValue &&
+            fromDate.Value.Date > toDate.Value.Date)
+        {
+            errorMessage =
+                "FromDate cannot be later than ToDate.";
+            return;
+        }
+
+        isLoading = true;
+
+        try
+        {
+            var parameters = new List<string>();
+
+            if (fromDate.HasValue)
+            {
+                parameters.Add(
+                    "fromDate=" +
+                    fromDate.Value.ToString(
+                        "yyyy-MM-dd",
+                        CultureInfo.InvariantCulture));
+            }
+
+            if (toDate.HasValue)
+            {
+                parameters.Add(
+                    "toDate=" +
+                    toDate.Value.ToString(
+                        "yyyy-MM-dd",
+                        CultureInfo.InvariantCulture));
+            }
+
+            if (selectedVendorId > 0)
+            {
+                parameters.Add(
+                    $"vendorId={selectedVendorId}");
+            }
+
+            string url = "api/reports/purchases";
+
+            if (parameters.Count > 0)
+            {
+                url += "?" + string.Join("&", parameters);
+            }
+
+            using var response = await Api.GetAsync(url);
+
+            if (!response.IsSuccessStatusCode)
+            {
+                errorMessage =
+                    "Could not generate purchase report: " +
+                    await response.Content.ReadAsStringAsync();
+
+                return;
+            }
+
+            report = await response.Content
+                .ReadFromJsonAsync<PurchaseReportDto>();
+
+            if (report == null)
+            {
+                errorMessage =
+                    "The purchase report response was empty.";
+            }
+        }
+        catch (Exception ex)
+        {
+            errorMessage =
+                "Could not generate purchase report: " +
+                ex.Message;
+        }
+        finally
+        {
+            isLoading = false;
+        }
+    }
+
+    public class VendorDto
+    {
+        public int VendorId { get; set; }
+        public string Name { get; set; } = "";
+    }
+
+    public class PurchaseReportDto
+    {
+        public List<PurchaseTransactionDto> Transactions
+            { get; set; } = new();
+
+        public decimal TotalPurchaseAmount { get; set; }
+
+        public decimal TotalDiscounts { get; set; }
+
+        public int TotalPurchaseInvoices { get; set; }
+
+        public int TotalUnitsPurchased { get; set; }
+    }
+
+    public class PurchaseTransactionDto
+    {
+        public int PurchaseInvoiceId { get; set; }
+
+        public string PurchaseInvoiceNumber { get; set; } = "";
+
+        public DateTime PurchaseDate { get; set; }
+
+        public int VendorId { get; set; }
+
+        public string VendorName { get; set; } = "";
+
+        public decimal OriginalSubtotal { get; set; }
+
+        public decimal DiscountPercent { get; set; }
+
+        public decimal RoundingDiscount { get; set; }
+
+        public decimal TotalDiscountAmount { get; set; }
+
+        public decimal TotalDiscountPercent { get; set; }
+
+        public int TotalUnits { get; set; }
+
+        public decimal TotalAmount { get; set; }
+    }
+}

@@ -276,6 +276,14 @@ else
             <span>- EGP @RoundingDiscount.ToString("N2")</span>
         </div>
 
+        <div class ="d-flex justify-content-between mb-2">
+            <strong>Total Discount (%)</strong>
+            <strong class= "text-success">
+                @TotalDiscountPercent.ToString("N2")%
+            </strong>
+        </div>
+
+
         <hr />
 
         <div class="d-flex justify-content-between">
@@ -597,6 +605,11 @@ else
     private decimal RoundingDiscount =>
         TotalBeforeRounding - InvoiceTotal;
 
+    private decimal TotalDiscountPercent =>
+        OriginalSubtotal > 0
+            ?decimal.Round((OriginalSubtotal - InvoiceTotal) / OriginalSubtotal * 100 ,
+            2 , MidpointRounding.AwayFromZero):0;
+
     // Validate discount percentages.
     private bool IsValidDiscount(decimal discount)
     {
@@ -721,5 +734,6 @@ else
         public int InvoiceId { get; set; }
         public string InvoiceNumber { get; set; } = "";
         public decimal TotalAmount { get; set; }
+        public decimal TotalDiscountPercent {get; set; }
     }
 }

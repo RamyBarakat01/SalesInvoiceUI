@@ -1,0 +1,161 @@
+
+@page "/inventory"
+@rendermode InteractiveServer
+@using System.Net.Http.Json
+@inject IHttpClientFactory HttpClientFactory
+
+<PageTitle>Inventory Dashboard</PageTitle>
+
+<h1>Inventory Dashboard</h1>
+<p class="text-muted">
+    View current product stock, selling prices and inventory costs.
+</p>
+
+@if (!string.IsNullOrWhiteSpace(errorMessage))
+{
+    <div class="alert alert-danger">@errorMessage</div>
+}
+
+@if (isLoading)
+{
+    <p>Loading inventory...</p>
+}
+else if (inventory != null)
+{
+    <div class="row g-3 mb-4">
+        <div class="col-md-3">
+            <div class="card p-3 shadow-sm h-100">
+                <div class="text-muted">Total Products</div>
+                <h3>@inventory.TotalProducts</h3>
+            </div>
+        </div>
+
+        <div class="col-md-3">
+            <div class="card p-3 shadow-sm h-100">
+                <div class="text-muted">Units in Stock</div>
+                <h3>@inventory.TotalUnits</h3>
+            </div>
+        </div>
+
+        <div class="col-md-3">
+            <div class="card p-3 shadow-sm h-100">
+                <div class="text-muted">Inventory Value</div>
+                <h3>EGP @inventory.TotalInventoryValue.ToString("N2")</h3>
+            </div>
+        </div>
+
+        <div class="col-md-3">
+            <div class="card p-3 shadow-sm h-100">
+                <div class="text-muted">Out of Stock</div>
+                <h3>@inventory.OutOfStockProducts</h3>
+            </div>
+        </div>
+    </div>
+
+    <div class="card shadow-sm p-4">
+        <div class="d-flex justify-content-between align-items-center mb-3">
+            <h4 class="mb-0">Product Inventory</h4>
+
+            <button class="btn btn-outline-primary"
+                    disabled="@isLoading"
+                    @onclick="LoadInventory">
+                Refresh
+            </button>
+        </div>
+
+        <div class="table-responsive">
+            <table class="table table-striped align-middle">
+                <thead>
+                    <tr>
+                        <th>Product</th>
+                        <th>Available Stock</th>
+                        <th>Selling Price</th>
+                        <th>Average Cost</th>
+                        <th>Inventory Value</th>
+                        <th>Status</th>
+                    </tr>
+                </thead>
+
+                <tbody>
+                    @foreach (var product in inventory.Products)
+                    {
+                        <tr>
+                            <td>@product.Name</td>
+                            <td>@product.StockQuantity</td>
+                            <td>EGP @product.SellingPrice.ToString("N2")</td>
+                            <td>EGP @product.AverageCost.ToString("N4")</td>
+                            <td>EGP @product.InventoryValue.ToString("N2")</td>
+                            <td>
+                                @if (product.StockQuantity == 0)
+                                {
+                                    <span class="badge bg-danger">
+                                        Out of Stock
+                                    </span>
+                                }
+                                else
+                                {
+                                    <span class="badge bg-success">
+                                        Available
+                                    </span>
+                                }
+                            </td>
+                        </tr>
+                    }
+                </tbody>
+            </table>
+        </div>
+    </div>
+}
+
+@code {
+    private bool isLoading = true;
+    private string errorMessage = "";
+    private InventoryResponse? inventory;
+
+    private HttpClient Api =>
+        HttpClientFactory.CreateClient("SalesInvoiceAPI");
+
+    protected override async Task OnInitializedAsync()
+    {
+        await LoadInventory();
+    }
+
+    private async Task LoadInventory()
+    {
+        isLoading = true;
+        errorMessage = "";
+
+        try
+        {
+            inventory = await Api.GetFromJsonAsync<InventoryResponse>(
+                "api/inventory");
+        }
+        catch (Exception ex)
+        {
+            errorMessage = "Could not load inventory: " + ex.Message;
+        }
+        finally
+        {
+            isLoading = false;
+        }
+    }
+
+    public class InventoryResponse
+    {
+        public List<InventoryProductDto> Products { get; set; } = new();
+        public int TotalProducts { get; set; }
+        public int TotalUnits { get; set; }
+        public decimal TotalInventoryValue { get; set; }
+        public int OutOfStockProducts { get; set; }
+    }
+
+    public class InventoryProductDto
+    {
+        public int ProductId { get; set; }
+        public string Name { get; set; } = "";
+        public decimal SellingPrice { get; set; }
+        public int StockQuantity { get; set; }
+        public decimal AverageCost { get; set; }
+        public decimal InventoryValue { get; set; }
+    }
+}
